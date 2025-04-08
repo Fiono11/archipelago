@@ -46,7 +46,7 @@ pub struct Process {
     b_sets: B,
     responses: Responses,
     senders: Vec<Sender<Message>>,
-    stop_flag: bool,
+    stop_flag: Arc<RwLock<bool>>,
     byzantine: bool,
 }
 
@@ -61,7 +61,8 @@ impl Process {
         let r_set_clone = Arc::clone(&r_set);
         let a_sets_clone = Arc::clone(&a_sets);
         let b_sets_clone = Arc::clone(&b_sets);
-        let stop_flag = false;
+        let stop_flag = Arc::new(RwLock::new(false));
+        let stop_flag_clone = Arc::clone(&stop_flag);
 
         let state = Process {
             id,
@@ -84,7 +85,7 @@ impl Process {
                 r_set_clone,
                 a_sets_clone,
                 b_sets_clone,
-                stop_flag,
+                stop_flag_clone,
                 receiver,
                 byzantine
             );
@@ -101,7 +102,7 @@ impl Process {
         r_set: R,
         a_sets: A,
         b_sets: B,
-        stop_flag: bool,
+        stop_flag: Arc<RwLock<bool>>,
         receiver: Receiver<Message>,
         byzantine: bool
     ) {
@@ -110,7 +111,7 @@ impl Process {
 
         loop {
             // Check if we should stop
-            if stop_flag{
+            if *stop_flag.read().unwrap() {
                 info!("Process {} received stop signal, terminating", id);
                 break;
             }
@@ -182,9 +183,9 @@ impl Process {
         }
     }
 
-    pub fn stop(mut self) {
+    pub fn stop(&mut self) {
         info!("Process {} stopping", self.id);
-        self.stop_flag = true;
+        *self.stop_flag.write().unwrap() = true;
     }
 
     fn send_message(senders: &[Sender<Message>], message: &mut Message, byzantine: bool) {   
@@ -249,7 +250,7 @@ impl Process {
 
     pub fn propose(&mut self, threshold: usize, value: i64, rank: Rank) -> i64 {
         loop {
-            if self.stop_flag {
+            if *self.stop_flag.read().unwrap() {
                 info!("Process {} received stop signal, terminating", self.id);
                 return -1;
             }
@@ -1151,16 +1152,16 @@ mod tests {
             let threshold = 2 * f + 1;
             
             let mut process1 = Process::new(0, f, vec![sender1.clone(), sender2.clone(), sender3.clone(), sender4.clone()], receiver1, false);
-            let process1_clone = process1.clone();
+            let mut process1_clone = process1.clone();
             
             let mut process2 = Process::new(1, f, vec![sender1.clone(), sender2.clone(), sender3.clone(), sender4.clone()], receiver2, false);
-            let process2_clone = process2.clone();
+            let mut process2_clone = process2.clone();
             
             let mut process3 = Process::new(2, f, vec![sender1.clone(), sender2.clone(), sender3.clone(), sender4.clone()], receiver3, false);
-            let process3_clone = process3.clone();
+            let mut process3_clone = process3.clone();
             
             let process4 = Process::new(3, f, vec![sender1.clone(), sender2.clone(), sender3.clone(), sender4.clone()], receiver4, true);
-            let process4_clone = process4.clone();
+            let mut process4_clone = process4.clone();
 
             let p1 = thread::spawn(move || {
                 process1.propose(threshold, instance + 0, 0)
