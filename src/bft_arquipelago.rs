@@ -1,4 +1,4 @@
-use std::{cmp::max, collections::{HashMap, HashSet}, sync::{mpsc::{Receiver, Sender}, Arc, RwLock}, thread};
+use std::{cmp::max, collections::{HashMap, HashSet}, sync::{mpsc::{Receiver, Sender}, Arc, RwLock, atomic::{AtomicBool, Ordering}}, thread};
 use crate::{AValue, BValue, Broadcast, Decision, Id, Message, RValue, Rank, Response, State, Step, Value};
 use log::info;
 use rand::{self, Rng};
@@ -46,7 +46,7 @@ pub struct Process {
     b_sets: B,
     responses: Responses,
     senders: Vec<Sender<Message>>,
-    stop_flag: Arc<RwLock<bool>>,
+    stop_flag: Arc<AtomicBool>,
     byzantine: bool,
 }
 
@@ -61,7 +61,7 @@ impl Process {
         let r_set_clone = Arc::clone(&r_set);
         let a_sets_clone = Arc::clone(&a_sets);
         let b_sets_clone = Arc::clone(&b_sets);
-        let stop_flag = Arc::new(RwLock::new(false));
+        let stop_flag = Arc::new(AtomicBool::new(false));
         let stop_flag_clone = Arc::clone(&stop_flag);
 
         let state = Process {
@@ -102,7 +102,7 @@ impl Process {
         r_set: R,
         a_sets: A,
         b_sets: B,
-        stop_flag: Arc<RwLock<bool>>,
+        stop_flag: Arc<AtomicBool>,
         receiver: Receiver<Message>,
         byzantine: bool
     ) {
@@ -111,7 +111,7 @@ impl Process {
 
         loop {
             // Check if we should stop
-            if *stop_flag.read().unwrap() {
+            if stop_flag.load(Ordering::Relaxed) {
                 info!("Process {} received stop signal, terminating", id);
                 break;
             }
@@ -185,7 +185,7 @@ impl Process {
 
     pub fn stop(&mut self) {
         info!("Process {} stopping", self.id);
-        *self.stop_flag.write().unwrap() = true;
+        self.stop_flag.store(true, Ordering::Relaxed);
     }
 
     fn send_message(senders: &[Sender<Message>], message: &mut Message, byzantine: bool) {   
@@ -250,7 +250,7 @@ impl Process {
 
     pub fn propose(&mut self, threshold: usize, value: i64, rank: Rank) -> i64 {
         loop {
-            if *self.stop_flag.read().unwrap() {
+            if self.stop_flag.load(Ordering::Relaxed) {
                 info!("Process {} received stop signal, terminating", self.id);
                 return -1;
             }
