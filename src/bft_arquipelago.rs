@@ -32,6 +32,12 @@ type A = Arc<RwLock<Vec<Vec<AValue>>>>;
 // - (adopt, max(BResponses)) otherwise
 type B = Arc<RwLock<Vec<Vec<BValue>>>>;
 
+// Maps broadcasts to their count
+type Broadcasts = Arc<RwLock<HashMap<Broadcast, i64>>>;
+
+// Maps responses to their states
+type PendingResponses = Arc<RwLock<HashMap<Response, Vec<State>>>>;
+
 #[derive(Debug, Clone)]
 pub struct Process {
     id: Id,
@@ -40,25 +46,22 @@ pub struct Process {
     b_sets: B,
     responses: Responses,
     senders: Vec<Sender<Message>>,
-    stop_flag: Arc<RwLock<bool>>,
+    stop_flag: bool,
     byzantine: bool,
 }
 
 impl Process {
     pub fn new(id: Id, f: usize, senders: Vec<Sender<Message>>, receiver: Receiver<Message>, byzantine: bool) -> Self {   
-        let broadcasts = Arc::new(RwLock::new(HashMap::new()));
         let responses = Arc::new(RwLock::new(HashMap::new()));
         let responses_clone = responses.clone();
         let senders_clone = senders.clone();
         let r_set = Arc::new(RwLock::new(Vec::new()));
         let a_sets = Arc::new(RwLock::new(Vec::new()));
         let b_sets = Arc::new(RwLock::new(Vec::new()));
-        let pending_responses = Arc::new(RwLock::new(HashMap::new()));
         let r_set_clone = Arc::clone(&r_set);
         let a_sets_clone = Arc::clone(&a_sets);
         let b_sets_clone = Arc::clone(&b_sets);
-        let stop_flag = Arc::new(RwLock::new(false));
-        let stop_flag_clone = stop_flag.clone();
+        let stop_flag = false;
 
         let state = Process {
             id,
@@ -76,14 +79,12 @@ impl Process {
             Process::run(
                 id,
                 f,
-                broadcasts,
                 responses_clone,
                 senders_clone,
                 r_set_clone,
                 a_sets_clone,
                 b_sets_clone,
-                pending_responses,
-                stop_flag_clone,
+                stop_flag,
                 receiver,
                 byzantine
             );
@@ -95,20 +96,21 @@ impl Process {
     fn run(
         id: Id,
         f: usize,
-        broadcasts: Arc<RwLock<HashMap<Broadcast, i64>>>,
         responses: Responses,
         senders: Vec<Sender<Message>>,
         r_set: R,
         a_sets: A,
         b_sets: B,
-        pending_responses: Arc<RwLock<HashMap<Response, Vec<State>>>>,
-        stop_flag: Arc<RwLock<bool>>,
+        stop_flag: bool,
         receiver: Receiver<Message>,
         byzantine: bool
     ) {
+        let broadcasts: Broadcasts = Arc::new(RwLock::new(HashMap::new()));
+        let pending_responses: PendingResponses = Arc::new(RwLock::new(HashMap::new()));
+
         loop {
             // Check if we should stop
-            if *stop_flag.read().unwrap() {
+            if stop_flag{
                 info!("Process {} received stop signal, terminating", id);
                 break;
             }
@@ -180,9 +182,9 @@ impl Process {
         }
     }
 
-    pub fn stop(&self) {
+    pub fn stop(mut self) {
         info!("Process {} stopping", self.id);
-        *self.stop_flag.write().unwrap() = true;
+        self.stop_flag = true;
     }
 
     fn send_message(senders: &[Sender<Message>], message: &mut Message, byzantine: bool) {   
@@ -247,7 +249,7 @@ impl Process {
 
     pub fn propose(&mut self, threshold: usize, value: i64, rank: Rank) -> i64 {
         loop {
-            if *self.stop_flag.read().unwrap() {
+            if self.stop_flag {
                 info!("Process {} received stop signal, terminating", self.id);
                 return -1;
             }
@@ -368,7 +370,7 @@ impl Process {
         broadcast: &Broadcast,
         senders: &[Sender<Message>],
         r_set: &R,
-        broadcasts: &Arc<RwLock<HashMap<Broadcast, i64>>>,
+        broadcasts: &Broadcasts,
         byzantine: bool
     ) {
         let broadcast_r_value = RValue::new(broadcast.rank, broadcast.value);
@@ -512,7 +514,7 @@ impl Process {
         broadcast: &Broadcast,
         senders: &[Sender<Message>],
         a_sets: &A,
-        broadcasts: &Arc<RwLock<HashMap<Broadcast, i64>>>,
+        broadcasts: &Broadcasts,
         byzantine: bool
     ) {
         let j = broadcast.rank as usize;
@@ -692,7 +694,7 @@ impl Process {
         broadcast: &Broadcast,
         senders: &[Sender<Message>],
         b_sets: &B,
-        broadcasts: &Arc<RwLock<HashMap<Broadcast, i64>>>,
+        broadcasts: &Broadcasts,
         byzantine: bool
     ) {
         let len = {
@@ -878,9 +880,9 @@ impl Process {
 
     fn handle_response(
         response: Response,
-        broadcasts: &Arc<RwLock<HashMap<Broadcast, i64>>>,
+        broadcasts: &Broadcasts,
         responses: &Responses,
-        pending_responses: &Arc<RwLock<HashMap<Response, Vec<State>>>>,
+        pending_responses: &PendingResponses,
         threshold: usize
     ) {
         info!("Handling response: step={:?}, sender={}, rank={}", 
