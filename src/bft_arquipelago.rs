@@ -1,15 +1,44 @@
 use std::{cmp::max, collections::{HashMap, HashSet}, sync::{mpsc::{Receiver, Sender}, Arc, RwLock}, thread};
-use crate::{AValue, BValue, Broadcast, Decision, Id, Message, RValue, Rank, Response, Responses, State, Step, Value};
+use crate::{AValue, BValue, Broadcast, Decision, Id, Message, RValue, Rank, Response, State, Step, Value};
 use log::info;
 use rand::{self, Rng};
+
+// Each process receives 2f+1 responses per step and rank 
+type Responses = Arc<RwLock<HashMap<(Step, Rank), HashMap<Id, Response>>>>;
+
+// In the first step of rank i, each process: 
+// 1) Broadcasts its R
+// 2) Waits valid responses from 2f+1 processes 
+// 3) Keeps the maximum value v in R
+// 4) Returns (i, v)
+type R = Arc<RwLock<Vec<RValue>>>;
+
+// In the second step of rank i, each process: 
+// 1) Broadcasts its A
+// 2) Waits valid responses from 2f+1 processes 
+// 3) Keeps the two highest values in A
+// 4) According to the received AResponses, it returns:
+// - (true, v) if there is only one value v 
+// - (false, max(A)) otherwise
+type A = Arc<RwLock<Vec<Vec<AValue>>>>;
+
+// In the third step of rank i, each process: 
+// 1) Broadcasts its B
+// 2) Waits valid responses from 2f+1 processes
+// 3) Keeps the (true, v) pair and the highest (false, pair), if there is one
+// 4) According to the received BResponses, it returns:
+// - (commit, v) if there are at least 2f+1 (commit, v)
+// - (adopt, v) if there is at least 1 (commit, v)
+// - (adopt, max(BResponses)) otherwise
+type B = Arc<RwLock<Vec<Vec<BValue>>>>;
 
 #[derive(Debug, Clone)]
 pub struct Process {
     id: Id,
-    r_set: Arc<RwLock<Vec<RValue>>>,
-    a_sets: Arc<RwLock<Vec<Vec<AValue>>>>,
-    b_sets: Arc<RwLock<Vec<Vec<BValue>>>>,
-    responses: Arc<RwLock<HashMap<(Step, Rank), HashMap<Id, Response>>>>,
+    r_set: R,
+    a_sets: A,
+    b_sets: B,
+    responses: Responses,
     senders: Vec<Sender<Message>>,
     stop_flag: Arc<RwLock<bool>>,
     byzantine: bool,
@@ -25,7 +54,7 @@ impl Process {
         let a_sets = Arc::new(RwLock::new(Vec::new()));
         let b_sets = Arc::new(RwLock::new(Vec::new()));
         let pending_responses = Arc::new(RwLock::new(HashMap::new()));
-        let r_set_clone: Arc<RwLock<Vec<RValue>>> = Arc::clone(&r_set);
+        let r_set_clone = Arc::clone(&r_set);
         let a_sets_clone = Arc::clone(&a_sets);
         let b_sets_clone = Arc::clone(&b_sets);
         let stop_flag = Arc::new(RwLock::new(false));
@@ -66,12 +95,12 @@ impl Process {
     fn run(
         id: Id,
         f: usize,
-        broadcasts: Arc<RwLock<HashMap<Broadcast, Responses>>>,
-        responses: Arc<RwLock<HashMap<(Step, Rank), HashMap<Id, Response>>>>,
+        broadcasts: Arc<RwLock<HashMap<Broadcast, i64>>>,
+        responses: Responses,
         senders: Vec<Sender<Message>>,
-        r_set: Arc<RwLock<Vec<RValue>>>,
-        a_sets: Arc<RwLock<Vec<Vec<AValue>>>>,
-        b_sets: Arc<RwLock<Vec<Vec<BValue>>>>,
+        r_set: R,
+        a_sets: A,
+        b_sets: B,
         pending_responses: Arc<RwLock<HashMap<Response, Vec<State>>>>,
         stop_flag: Arc<RwLock<bool>>,
         receiver: Receiver<Message>,
@@ -316,7 +345,7 @@ impl Process {
         Process::r_max(r_values, &self.r_set)
     }
 
-    fn r_max(r_values: Vec<RValue>, r_set: &Arc<RwLock<Vec<RValue>>>) -> RValue {
+    fn r_max(r_values: Vec<RValue>, r_set: &R) -> RValue {
         // Line 20: R ← R ∪ {union of all valid Rs received in previous line}
         let mut combined_values = r_values;
         combined_values.extend(r_set.read().unwrap().clone());
@@ -338,8 +367,8 @@ impl Process {
         id: Id,
         broadcast: &Broadcast,
         senders: &[Sender<Message>],
-        r_set: &Arc<RwLock<Vec<RValue>>>,
-        broadcasts: &Arc<RwLock<HashMap<Broadcast, Responses>>>,
+        r_set: &R,
+        broadcasts: &Arc<RwLock<HashMap<Broadcast, i64>>>,
         byzantine: bool
     ) {
         let broadcast_r_value = RValue::new(broadcast.rank, broadcast.value);
@@ -482,8 +511,8 @@ impl Process {
         id: Id,
         broadcast: &Broadcast,
         senders: &[Sender<Message>],
-        a_sets: &Arc<RwLock<Vec<Vec<AValue>>>>,
-        broadcasts: &Arc<RwLock<HashMap<Broadcast, Responses>>>,
+        a_sets: &A,
+        broadcasts: &Arc<RwLock<HashMap<Broadcast, i64>>>,
         byzantine: bool
     ) {
         let j = broadcast.rank as usize;
@@ -662,8 +691,8 @@ impl Process {
         id: Id,
         broadcast: &Broadcast,
         senders: &[Sender<Message>],
-        b_sets: &Arc<RwLock<Vec<Vec<BValue>>>>,
-        broadcasts: &Arc<RwLock<HashMap<Broadcast, Responses>>>,
+        b_sets: &B,
+        broadcasts: &Arc<RwLock<HashMap<Broadcast, i64>>>,
         byzantine: bool
     ) {
         let len = {
@@ -854,8 +883,8 @@ impl Process {
 
     fn handle_response(
         response: Response,
-        broadcasts: &Arc<RwLock<HashMap<Broadcast, Responses>>>,
-        responses: &Arc<RwLock<HashMap<(Step, Rank), HashMap<Id, Response>>>>,
+        broadcasts: &Arc<RwLock<HashMap<Broadcast, i64>>>,
+        responses: &Responses,
         pending_responses: &Arc<RwLock<HashMap<Response, Vec<State>>>>,
         threshold: usize
     ) {
@@ -1017,7 +1046,7 @@ impl Process {
     fn reliably_check_broadcast(
         broadcast: &Broadcast,
         f: usize,
-        r_set: &Arc<RwLock<Vec<RValue>>>,
+        r_set: &R,
     ) -> bool {
         if broadcast.step == Step::R && broadcast.rank == 0 {
             return true;

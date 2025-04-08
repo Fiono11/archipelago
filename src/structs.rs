@@ -1,8 +1,7 @@
-use std::{cmp::Ordering, collections::HashSet, hash::{DefaultHasher, Hash, Hasher}};
+use std::{cmp::Ordering, hash::{DefaultHasher, Hash, Hasher}};
 
 pub type Id = i64;
 pub type Rank = i64;
-pub type Responses = i64;
 pub type BroadcastHash = u64;
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
