@@ -290,26 +290,16 @@ impl Process {
             info!("Process {} waiting for {} B responses from rank {}", 
                   self.id, threshold, rank - 1);
 
-            let mut responses: Vec<Response> = Vec::new();
-            let mut unique_processes = HashSet::new();
+                  let key = (Step::B, rank - 1);
 
-            while responses.len() < threshold {
-                let key = (Step::B, rank - 1);
-                let b_responses = {
-                    let responses_read = self.responses.read().unwrap();
-                    if let Some(step_responses) = responses_read.get(&key) {
-                        step_responses.values().cloned().collect::<Vec<Response>>()
-                    } else {
-                        Vec::new()
-                    }
-                };
-
-                for b_response in b_responses {
-                    if unique_processes.insert(b_response.sender) {
-                        responses.push(b_response);
-                    }
-                }
-            }
+                  loop {
+                      let responses = self.responses.read().unwrap();
+                      if responses.get(&key).map(|m| m.len()).unwrap_or(0) == threshold {
+                          break;
+                      }
+                  }
+                                
+                  let responses = self.responses.read().unwrap().get(&key).unwrap().values().cloned().collect();
                     
             let broadcast = Broadcast::new(self.id, vec![r_set_values], Step::R, value, None, rank, Some(responses));
             
@@ -416,33 +406,23 @@ impl Process {
         info!("Process {} starting A-step with rank {} and value {}", 
               self.id, rank, value);
 
-        let mut responses = Vec::new();
-        let mut unique_processes = HashSet::new();
+              let key = (Step::R, rank);
 
-        // Line 32: compile certificate C
-        while responses.len() < threshold {
-            let key = (Step::R, rank);
-            let r_responses = {
-                let responses_read = self.responses.read().unwrap();
-                if let Some(step_responses) = responses_read.get(&key) {
-                    step_responses.values().cloned().collect::<Vec<Response>>()
-                } else {
-                    Vec::new()
-                }
-            };
-
-            for r_response in r_responses {
-                if unique_processes.insert(r_response.sender) {
-                    responses.push(r_response);
-                }
-            }
-        }
+              // Line 32: compile certificate C
+              loop {
+                  let responses = self.responses.read().unwrap();
+                  if responses.get(&key).map(|m| m.len()).unwrap_or(0) == threshold {
+                      break;
+                  }
+              }
+                            
+              let responses = self.responses.read().unwrap().get(&key).unwrap().values().cloned().collect();
 
         let a_sets_values: Vec<Vec<Value>> = self.a_sets.read().unwrap().iter()
             .map(|set| set.iter().map(|a| Value::AValue(*a)).collect())
             .collect();
         
-        let broadcast = Broadcast::new(self.id, a_sets_values, Step::A, value, None, rank, Some(responses.clone()));
+        let broadcast = Broadcast::new(self.id, a_sets_values, Step::A, value, None, rank, Some(responses));
 
         // Line 33: broadcast(A, i, v, C)
         Process::send_message(&self.senders, &mut Message::Broadcast(broadcast), self.byzantine);
@@ -591,27 +571,17 @@ impl Process {
         info!("Process {} starting B-step with rank {}, value {}, flag={}", 
               self.id, rank, value, flag);
 
-        let mut responses = Vec::new();
-        let mut unique_processes = HashSet::new();
-
         // Line 51: compile certificate C
-        while responses.len() < threshold {
-            let key = (Step::A, rank);
-            let a_responses = {
-                let responses_read = self.responses.read().unwrap();
-                if let Some(step_responses) = responses_read.get(&key) {
-                    step_responses.values().cloned().collect::<Vec<Response>>()
-                } else {
-                    Vec::new()
-                }
-            };
+        let key = (Step::A, rank);
 
-            for a_response in a_responses {
-                if unique_processes.insert(a_response.sender) {
-                    responses.push(a_response);
-                }
+        loop {
+            let responses = self.responses.read().unwrap();
+            if responses.get(&key).map(|m| m.len()).unwrap_or(0) == threshold {
+                break;
             }
         }
+                
+        let responses = self.responses.read().unwrap().get(&key).unwrap().values().cloned().collect();
 
         let b_sets_values: Vec<Vec<Value>> = self.b_sets.read().unwrap().iter()
             .map(|set| set.iter().map(|a| Value::BValue(*a)).collect())
