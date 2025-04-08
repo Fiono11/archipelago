@@ -762,7 +762,7 @@ impl Process {
         
         // Case 1: Only true pairs
         if !true_pairs.is_empty() && false_pairs.is_empty() {
-            let b_value = true_pairs[0].clone();
+            let b_value = *true_pairs[0];
 
             let response_broadcast = broadcasts.read().unwrap()
                 .iter()
@@ -1026,7 +1026,7 @@ impl Process {
             value == broadcast.value
         }
         // Line 58: else if |{⟨true, val⟩ ∈ S}| ≥ 1 then
-        else if true_values.len() >= 1 {
+        else if !true_values.is_empty() {
             let value = true_values.first().unwrap().value;
             value == broadcast.value
         }
