@@ -4,9 +4,9 @@ This codebase is a PoC implementation of the BFT-Archipelago leaderless consensu
 # Leaderless Consensus
 - There are $n=3f+1$ processes, $f$ byzantine. 
 - The algorithm progresses in ranks.
-- Each rank has 3 steps: R, A and B.
-- (Page 7) In each round r, every (correct, non-suspended) a process $p_i$:
+- Each rank has 3 steps: $R$, $A$ and $B$.
+- (Page 7) In each round $r$, every (correct, non-suspended) a process $p_i$:
   1. Broadcasts a message (called a request).
-  2. Delivers all requests that were sent to $p_i$ in r.
+  2. Delivers all requests that were sent to $p_i$ in $r$.
   3. Sends a message (called a response) for every request it has delivered in (ii).
-  4. Delivers all replies sent to it in r.
+  4. Delivers all replies sent to it in $r$.
