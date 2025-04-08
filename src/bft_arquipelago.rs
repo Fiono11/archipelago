@@ -277,7 +277,7 @@ impl Process {
               self.id, rank, value);
 
         let r_set_values: Vec<Value> = self.r_set.read().unwrap().iter()
-            .map(|r| Value::RValue(r.clone()))
+            .map(|r| Value::RValue(*r))
             .collect();
 
         // Line 16: compile certificate C (empty at rank 0) 
@@ -436,7 +436,7 @@ impl Process {
         }
 
         let a_sets_values: Vec<Vec<Value>> = self.a_sets.read().unwrap().iter()
-            .map(|set| set.iter().map(|a| Value::AValue(a.clone())).collect())
+            .map(|set| set.iter().map(|a| Value::AValue(*a)).collect())
             .collect();
         
         let broadcast = Broadcast::new(self.id, a_sets_values, Step::A, value, None, rank, Some(responses.clone()));
@@ -478,11 +478,11 @@ impl Process {
         let mut max_value = AValue(value);
 
         for a_value in &a_values {
-            *value_counts.entry(a_value.clone()).or_insert(0) += 1;
+            *value_counts.entry(*a_value).or_insert(0) += 1;
             
             // Track the maximum value
             if a_value.0 > max_value.0 {
-                max_value = a_value.clone();
+                max_value = *a_value;
             }
         }
 
@@ -611,7 +611,7 @@ impl Process {
         }
 
         let b_sets_values: Vec<Vec<Value>> = self.b_sets.read().unwrap().iter()
-            .map(|set| set.iter().map(|a| Value::BValue(a.clone())).collect())
+            .map(|set| set.iter().map(|a| Value::BValue(*a)).collect())
             .collect();
         
         let broadcast = Broadcast::new(self.id, b_sets_values, Step::B, value, Some(flag), rank, Some(responses));
@@ -662,7 +662,7 @@ impl Process {
                   self.id, value, rank);
 
             // Line 57: return ⟨commit, val⟩
-            return Decision::Commit(value);
+            Decision::Commit(value)
         }
         // Line 58: else if |{⟨true, val⟩ ∈ S}| ≥ 1 then
         else if !true_values.is_empty() {
@@ -708,15 +708,10 @@ impl Process {
             let b_values = b_sets.read().unwrap().clone()[j].clone();
             let len = b_values.len();
 
-            let m = if len > 1 {
-                // Line 63: m ← max(B[j][0].v, B[j][1].v)
-                max(b_values[0].value, b_values[1].value)
-            }
-            else if len == 1 {
-                b_values[0].value
-            }
-            else {
-                0
+            let m = match len {
+                0 => 0,
+                1 => b_values[0].value,
+                _ => max(b_values[0].value, b_values[1].value)
             };
 
             if len < 2 {
@@ -789,7 +784,7 @@ impl Process {
         else if !true_pairs.is_empty() && !false_pairs.is_empty() {
             let mut b_state = Vec::new();
 
-            let b_value_true = true_pairs[0].clone();
+            let b_value_true = *true_pairs[0];
 
             let response_broadcast_true = broadcasts.read().unwrap()
                 .iter()
@@ -800,7 +795,7 @@ impl Process {
 
             b_state.push(State::new(Value::BValue(b_value_true), response_broadcast_true));
         
-            let b_value_false = false_pairs[0].clone();
+            let b_value_false = *false_pairs[0];
 
             let response_broadcast_false = broadcasts.read().unwrap()
                 .iter()
@@ -941,7 +936,7 @@ impl Process {
                     let mut responses_write = responses.write().unwrap();
                     
                     // Initialize the inner HashMap if not present
-                    let step_responses = responses_write.entry(key).or_insert_with(HashMap::new);
+                    let step_responses = responses_write.entry(key).or_default();
                     // Only insert if we haven't reached threshold responses for this step/rank
                     if step_responses.len() < threshold {
                         step_responses.insert(response.sender, response.clone());
@@ -977,11 +972,11 @@ impl Process {
         let mut max_value = AValue(broadcast.value);
 
         for a_value in &a_values {
-            *value_counts.entry(a_value.clone()).or_insert(0) += 1;
+            *value_counts.entry(*a_value).or_insert(0) += 1;
             
             // Track the maximum value
             if a_value.0 > max_value.0 {
-                max_value = a_value.clone();
+                max_value = *a_value;
             }
         }
 
@@ -1026,12 +1021,12 @@ impl Process {
         // Line 56: if |{⟨true, val⟩ ∈ S}| ≥ 2f + 1
         if true_values.len() >= threshold {
             let value = true_values.first().unwrap().value;
-            return value == broadcast.value;
+            value == broadcast.value
         }
         // Line 58: else if |{⟨true, val⟩ ∈ S}| ≥ 1 then
-        else if !true_values.is_empty() {
+        else if true_values.len() >= 1 {
             let value = true_values.first().unwrap().value;
-            return value == broadcast.value;
+            value == broadcast.value
         }
         else {
             let max_value = b_values.iter()
@@ -1039,7 +1034,7 @@ impl Process {
                 .map(|b_value| b_value.value)
                 .unwrap();
             
-            return max_value == broadcast.value;
+            max_value == broadcast.value
         }
     }
 
