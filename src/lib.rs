@@ -1,5 +1,5 @@
-pub mod bft_arquipelago;
+pub mod bft_archipelago;
 pub mod structs;
 
-pub use bft_arquipelago::*;
+pub use bft_archipelago::*;
 pub use structs::*;

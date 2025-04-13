@@ -14,7 +14,7 @@ pub enum Message {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Broadcast {
     pub sender: Id,
-    pub register: Vec<Vec<Value>>,
+    //pub register: Vec<Vec<Value>>,
     pub step: Step,
     pub value: i64,
     pub flag: Option<bool>,
@@ -31,8 +31,8 @@ impl Hash for Broadcast {
 }
 
 impl Broadcast {
-    pub fn new(sender: Id, register: Vec<Vec<Value>>, step: Step, value: i64, flag: Option<bool>, rank: Rank, previous_step_responses: Option<Vec<Response>>) -> Broadcast {
-        Broadcast { sender, register, step, value, flag, rank, previous_step_responses }
+    pub fn new(sender: Id, step: Step, value: i64, flag: Option<bool>, rank: Rank, previous_step_responses: Option<Vec<Response>>) -> Broadcast {
+        Broadcast { sender, step, value, flag, rank, previous_step_responses }
     }
 
     pub fn hash_value(&self) -> BroadcastHash {
