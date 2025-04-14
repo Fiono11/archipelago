@@ -1,5 +1,5 @@
-use std::{cmp::max, collections::{HashMap, HashSet}, sync::{mpsc::{Receiver, Sender}, Arc, RwLock, atomic::{AtomicBool, Ordering}}, thread};
-use crate::{AValue, BValue, Broadcast, Decision, Id, Message, RValue, Rank, Response, State, Step, Value};
+use std::{cmp::max, collections::{BTreeSet, HashMap, HashSet}, sync::{atomic::{AtomicBool, Ordering}, mpsc::{Receiver, Sender}, Arc, RwLock}, thread};
+use crate::{AValue, BValue, Broadcast, BroadcastHash, Decision, Id, Message, RValue, Rank, Response, State, Step, Value};
 use log::info;
 use rand::{self, Rng};
 
@@ -36,7 +36,7 @@ type B = Arc<RwLock<Vec<BValue>>>;
 type Broadcasts = HashMap<Broadcast, i64>;
 
 // Maps responses to their states
-type PendingResponses = HashMap<Vec<Broadcast>, HashSet<Response>>;
+type PendingResponses = HashMap<BTreeSet<BroadcastHash>, HashSet<Response>>;
 
 #[derive(Debug, Clone)]
 pub struct Process {
@@ -143,14 +143,14 @@ impl Process {
                                     );
                                 }
                                 Step::A => {
-                                    /*Process::answer_a_broadcast(
+                                    Process::answer_a_broadcast(
                                         id,
                                         &broadcast,
                                         &senders,
                                         &a_sets,
                                         &broadcasts,
                                         byzantine
-                                    );*/
+                                    );
                                 }
                                 Step::B => {
                                     /*Process::answer_b_broadcast(
@@ -395,7 +395,7 @@ impl Process {
     }
 
     // Line 31: Procedure A-Step(i, v)
-    /*fn a_step(&mut self, threshold: usize, r_value: RValue) -> (bool, i64) {
+    fn a_step(&mut self, threshold: usize, r_value: RValue) -> (bool, i64) {
         let value = r_value.value;
         let rank = r_value.rank;
         
@@ -405,20 +405,9 @@ impl Process {
               let key = (Step::R, rank);
 
               // Line 32: compile certificate C
-              loop {
-                  let responses = self.responses.read().unwrap();
-                  if responses.get(&key).map(|m| m.len()).unwrap_or(0) == threshold {
-                      break;
-                  }
-              }
-                            
               let responses = self.responses.read().unwrap().get(&key).unwrap().values().cloned().collect();
-
-        let a_sets_values: Vec<Vec<Value>> = self.a_sets.read().unwrap().iter()
-            .map(|set| set.iter().map(|a| Value::AValue(*a)).collect())
-            .collect();
         
-        let broadcast = Broadcast::new(self.id, a_sets_values, Step::A, value, None, rank, Some(responses));
+        let broadcast = Broadcast::new(self.id, Step::A, value, None, rank, Some(responses));
 
         // Line 33: broadcast(A, i, v, C)
         Process::send_message(&self.senders, &mut Message::Broadcast(broadcast), self.byzantine);
@@ -499,9 +488,9 @@ impl Process {
         
         // First, check if we need to update a_sets
         {
-            let mut a_sets_write = a_sets.write().unwrap();
+            let mut a_sets_write = a_sets.write().unwrap().clone();
             if a_sets_write.len() > j {
-                let current_set = &mut a_sets_write[j];
+                let mut current_set = a_sets_write;
                     // Line 43: if v /∈ A[j] and |A[j]| < 2
                     if !current_set.contains(&broadcast_value) && current_set.len() < 2 {
                         // Line 44: add v to A[j]
@@ -516,7 +505,7 @@ impl Process {
                     }
             }
             else {
-                a_sets_write.push(vec![broadcast_value]);
+                a_sets_write.push(broadcast_value);
             }
         }
 
@@ -525,7 +514,7 @@ impl Process {
         
         // Get the current a_sets state for sending responses
         let current_a_sets = {
-            a_sets.read().unwrap().clone()[j].clone()
+            a_sets.read().unwrap().clone().clone()
         };
 
         /* A broadcast from pi justifies a response from pj for an A-Step, if it contains 
@@ -533,7 +522,6 @@ impl Process {
         any value from the response different from v. */
 
         let mut a_states = Vec::new();
-        let broadcasts = broadcasts.read().unwrap().clone();
         
         for a_state in current_a_sets.iter() {
             if sent_values.insert(a_state.0) {
@@ -556,14 +544,14 @@ impl Process {
             Step::A,
             broadcast.rank,
             a_states,
-            broadcast.clone()
+            //broadcast.clone()
         );
         
         // Line 48: send(Aresp, j, A[j], sig, b) to all
         Process::send_message(senders, &mut Message::Response(response), byzantine);
     }
 
-    fn b_step(&mut self, threshold: usize, rank: Rank, flag: bool, value: i64) -> Decision {
+    /*fn b_step(&mut self, threshold: usize, rank: Rank, flag: bool, value: i64) -> Decision {
         info!("Process {} starting B-step with rank {}, value {}, flag={}", 
               self.id, rank, value, flag);
 
@@ -853,27 +841,41 @@ impl Process {
         pending_responses: &mut PendingResponses,
         threshold: usize
     ) {
-        let broadcasts: Vec<Broadcast> = response.state.iter().map(|r| r.broadcast.clone()).collect();
+        info!("Process {} handling response from {}: step={:?}, rank={}", 
+              id, response.sender, response.step, response.rank);
+              
+        // Extract broadcast hashes from response states
+        let broadcast_hashes: BTreeSet<BroadcastHash> = response.state.iter()
+            .map(|r| r.broadcast.hash_value())
+            .collect();
 
-        if !pending_responses.contains_key(&broadcasts) {
-            let mut responses = HashSet::new();
-            responses.insert(response);
-            pending_responses.insert(broadcasts.clone(), responses);
+        // Add to pending responses
+        if !pending_responses.contains_key(&broadcast_hashes) {
+            info!("Process {}: Creating new pending response entry", id);
+            let mut responses_set = HashSet::new();
+            responses_set.insert(response.clone());
+            pending_responses.insert(broadcast_hashes.clone(), responses_set);
+        } else {
+            info!("Process {}: Adding to existing pending responses", id);
+            pending_responses.get_mut(&broadcast_hashes).unwrap().insert(response.clone());
         }
-        else {
-            pending_responses.get_mut(&broadcasts).unwrap().insert(response);
-        }
 
-        let received_responses = pending_responses.get(&broadcasts).unwrap();
-
-        if received_responses.len() >= threshold {
-            for response in received_responses {
-                {
-                    let key = (response.step, response.rank);
+        // Check if we've reached the threshold
+        if let Some(received_responses) = pending_responses.get(&broadcast_hashes) {
+            info!("Process {}: Current pending responses count: {}/{}", 
+                id, received_responses.len(), threshold);
+                
+            if received_responses.len() >= threshold {
+                info!("Process {}: Threshold reached for responses ({}), storing in responses map", 
+                    id, threshold);
+                    
+                // Store each response in the responses map
+                for resp in received_responses {
+                    let key = (resp.step.clone(), resp.rank);
                     let mut responses_map = responses.write().unwrap();
                     responses_map.entry(key)
                         .or_insert_with(HashMap::new)
-                        .insert(response.sender, response.clone());
+                        .insert(resp.sender, resp.clone());
                 }
             }
         }
