@@ -153,14 +153,14 @@ impl Process {
                                     );
                                 }
                                 Step::B => {
-                                    /*Process::answer_b_broadcast(
+                                    Process::answer_b_broadcast(
                                         id,
                                         &broadcast,
                                         &senders,
                                         &b_sets,
                                         &broadcasts,
                                         byzantine
-                                    );*/
+                                    );
                                 }
                             }
                         }          
@@ -551,27 +551,16 @@ impl Process {
         Process::send_message(senders, &mut Message::Response(response), byzantine);
     }
 
-    /*fn b_step(&mut self, threshold: usize, rank: Rank, flag: bool, value: i64) -> Decision {
+    fn b_step(&mut self, threshold: usize, rank: Rank, flag: bool, value: i64) -> Decision {
         info!("Process {} starting B-step with rank {}, value {}, flag={}", 
               self.id, rank, value, flag);
 
         // Line 51: compile certificate C
         let key = (Step::A, rank);
-
-        loop {
-            let responses = self.responses.read().unwrap();
-            if responses.get(&key).map(|m| m.len()).unwrap_or(0) == threshold {
-                break;
-            }
-        }
                 
         let responses = self.responses.read().unwrap().get(&key).unwrap().values().cloned().collect();
-
-        let b_sets_values: Vec<Vec<Value>> = self.b_sets.read().unwrap().iter()
-            .map(|set| set.iter().map(|a| Value::BValue(*a)).collect())
-            .collect();
         
-        let broadcast = Broadcast::new(self.id, b_sets_values, Step::B, value, Some(flag), rank, Some(responses));
+        let broadcast = Broadcast::new(self.id, Step::B, value, Some(flag), rank, Some(responses));
         
         // Line 52: broadcast(B, i, , v, C)
         Process::send_message(&self.senders, &mut Message::Broadcast(broadcast), self.byzantine);
@@ -662,7 +651,7 @@ impl Process {
         let b_value = BValue::new(value, flag);
         
         if len > j {
-            let b_values = b_sets.read().unwrap().clone()[j].clone();
+            let b_values = b_sets.read().unwrap().clone();
             let len = b_values.len();
 
             let m = match len {
@@ -674,26 +663,26 @@ impl Process {
             if len < 2 {
                 {
                     // Line 64: if |B[j]| < 2 then add ⟨bool, v⟩ to B[j]
-                    b_sets.write().unwrap()[j].push(b_value);
+                    b_sets.write().unwrap().push(b_value);
                 }
             }
             else {
                 let contains_flag_value = {
-                    b_sets.read().unwrap()[j].iter().any(|value| value == &b_value)
+                    b_sets.read().unwrap().iter().any(|value| value == &b_value)
                 };
                 
                 // Line 65: else if(flag ∧ ⟨flag, v⟩ ∈/ B[j] ∨ ¬flag ∧ v > m) then
                 if (flag && !contains_flag_value) || (!flag && value > m) {
                     // Line 66: B[j][0] ← ⟨flag, v⟩
                     {
-                        b_sets.write().unwrap()[j][0] = b_value;
+                        b_sets.write().unwrap()[0] = b_value;
                     }
                 }
             }
         }
         else {
             {
-                b_sets.write().unwrap().push(vec![b_value]);
+                b_sets.write().unwrap().push(b_value);
             }
         }
 
@@ -704,7 +693,7 @@ impl Process {
         
         // Get true and false pairs
         let b_values = {
-            b_sets.read().unwrap()[j].clone()
+            b_sets.read().unwrap().clone()
         };
         
         let true_pairs: Vec<&BValue> = b_values.iter()
@@ -719,7 +708,7 @@ impl Process {
         if !true_pairs.is_empty() && false_pairs.is_empty() {
             let b_value = *true_pairs[0];
 
-            let response_broadcast = broadcasts.read().unwrap()
+            let response_broadcast = broadcasts
                 .iter()
                 .find(|(b, _)| matches!(b, rb if rb.value == b_value.value && rb.rank == broadcast.rank && rb.step == broadcast.step))
                 .unwrap()
@@ -732,7 +721,7 @@ impl Process {
                 Step::B,
                 broadcast.rank, 
                 vec![State::new(Value::BValue(b_value), response_broadcast)], 
-                broadcast.clone()
+                //broadcast.clone()
             );
 
             Process::send_message(senders, &mut Message::Response(response), byzantine);
@@ -743,7 +732,7 @@ impl Process {
 
             let b_value_true = *true_pairs[0];
 
-            let response_broadcast_true = broadcasts.read().unwrap()
+            let response_broadcast_true = broadcasts
                 .iter()
                 .find(|(b, _)| matches!(b, rb if rb.value == b_value_true.value && rb.rank == broadcast.rank && rb.step == broadcast.step))
                 .unwrap()
@@ -754,7 +743,7 @@ impl Process {
         
             let b_value_false = *false_pairs[0];
 
-            let response_broadcast_false = broadcasts.read().unwrap()
+            let response_broadcast_false = broadcasts
                 .iter()
                 .find(|(b, _)| matches!(b, rb if rb.value == b_value_false.value && rb.rank == broadcast.rank && rb.step == broadcast.step))
                 .unwrap()
@@ -768,7 +757,7 @@ impl Process {
                 Step::B,
                 broadcast.rank, 
                 b_state, 
-                broadcast.clone()
+                //broadcast.clone()
             );
 
             Process::send_message(senders, &mut Message::Response(response), byzantine);
@@ -780,7 +769,7 @@ impl Process {
                 .max_by_key(|b_state| b_state.value)
                 .unwrap();
 
-            let response_broadcast = broadcasts.read().unwrap()
+            let response_broadcast = broadcasts
                 .iter()
                 .find(|(b, _)| matches!(b, rb if rb.value == highest_false.value && rb.rank == broadcast.rank && rb.step == broadcast.step))
                 .unwrap()
@@ -792,14 +781,14 @@ impl Process {
                 Step::B,
                 broadcast.rank, 
                 vec![State::new(Value::BValue(**highest_false), response_broadcast)], 
-                broadcast.clone()
+                //broadcast.clone()
             );
 
             Process::send_message(senders, &mut Message::Response(response), byzantine);
         }
     }
 
-    fn validate_response(response: &Response) -> bool {
+    /*fn validate_response(response: &Response) -> bool {
         for state in &response.state {
             let broadcast = &state.broadcast;
             
