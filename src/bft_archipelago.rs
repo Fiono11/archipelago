@@ -36,7 +36,7 @@ type B = Arc<RwLock<Vec<BValue>>>;
 type Broadcasts = HashMap<Broadcast, i64>;
 
 // Maps responses to their states
-type PendingResponses = HashMap<Broadcast, Vec<Response>>;
+type PendingResponses = HashMap<Vec<Broadcast>, HashSet<Response>>;
 
 #[derive(Debug, Clone)]
 pub struct Process {
@@ -853,16 +853,18 @@ impl Process {
         pending_responses: &mut PendingResponses,
         threshold: usize
     ) {
-        let broadcast = response.state[0].broadcast.clone();
+        let broadcasts: Vec<Broadcast> = response.state.iter().map(|r| r.broadcast.clone()).collect();
 
-        if !pending_responses.contains_key(&broadcast) {
-            pending_responses.insert(broadcast.clone(), vec![response]);
+        if !pending_responses.contains_key(&broadcasts) {
+            let mut responses = HashSet::new();
+            responses.insert(response);
+            pending_responses.insert(broadcasts.clone(), responses);
         }
         else {
-            pending_responses.get_mut(&broadcast).unwrap().push(response);
+            pending_responses.get_mut(&broadcasts).unwrap().insert(response);
         }
 
-        let received_responses = pending_responses.get(&broadcast).unwrap();
+        let received_responses = pending_responses.get(&broadcasts).unwrap();
 
         if received_responses.len() >= threshold {
             for response in received_responses {
