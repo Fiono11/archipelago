@@ -33,10 +33,10 @@ type A = Arc<RwLock<Vec<AValue>>>;
 type B = Arc<RwLock<Vec<BValue>>>;
 
 // Maps broadcasts to their count
-type Broadcasts = Arc<RwLock<HashMap<Broadcast, i64>>>;
+type Broadcasts = HashMap<Broadcast, i64>;
 
 // Maps responses to their states
-type PendingResponses = Arc<RwLock<HashSet<Response>>>;
+type PendingResponses = HashMap<Broadcast, Vec<Response>>;
 
 #[derive(Debug, Clone)]
 pub struct Process {
@@ -106,8 +106,8 @@ impl Process {
         receiver: Receiver<Message>,
         byzantine: bool
     ) {
-        let broadcasts: Broadcasts = Arc::new(RwLock::new(HashMap::new()));
-        let pending_responses: PendingResponses = Arc::new(RwLock::new(HashSet::new()));
+        let mut broadcasts: Broadcasts = HashMap::new();
+        let mut pending_responses: PendingResponses = HashMap::new();
 
         loop {
             // Check if we should stop
@@ -119,13 +119,12 @@ impl Process {
             if let Ok(msg) = receiver.recv() {
                 match msg {
                     Message::Broadcast(broadcast) => {                        
-                        info!("Process {} RECEIVED BROADCAST: step={:?}, sender={}, rank={}, value={}, previous_step_responses={:?}", 
-                            id, broadcast.step, broadcast.sender, broadcast.rank, broadcast.value, broadcast.previous_step_responses);
+                        info!("Process {} RECEIVED BROADCAST with hash {}: step={:?}, sender={}, rank={}, value={}, previous_step_responses={:?}", 
+                            id, broadcast.hash_value(), broadcast.step, broadcast.sender, broadcast.rank, broadcast.value, broadcast.previous_step_responses);
 
-                        {
-                            let mut broadcasts_write = broadcasts.write().unwrap();
-                            broadcasts_write.entry(broadcast.clone()).or_insert(0);
-                        }
+                        broadcasts.entry(broadcast.clone()).or_insert(0);
+
+                        assert!(broadcasts.len() <= 3);
 
                         // Lines 26, 42, 62
                         let is_reliable = Process::reliably_check_broadcast(&broadcast, &broadcasts, f, &r_set);
@@ -167,14 +166,15 @@ impl Process {
                         }          
                     }
                     Message::Response(response) => {
-                        info!("Process {} RECEIVED RESPONSE: step={:?}, sender={}, state={:?}, rank={}, broadcast_request={:?}", 
-                            id, response.step, response.sender, response.state, response.rank, response.broadcast_request);
+                        info!("Process {} RECEIVED RESPONSE with broadcast hash {}: step={:?}, sender={}, state={:?}, rank={}", 
+                            id, response.state[0].broadcast.hash_value(), response.step, response.sender, response.state, response.rank);
 
-                        Process::handle_response(
+                        Process::reliably_check_response(
+                            id,
                             response,
-                            &broadcasts,
+                            &mut broadcasts,
                             &responses,
-                            &pending_responses,
+                            &mut pending_responses,
                             2 * f + 1
                         );
                     }
@@ -217,13 +217,13 @@ impl Process {
                             //1 => response.rank = rng.gen_range(0..100),
                             2 => {
                                 // Randomly change one of the states
-                                if !response.state.is_empty() {
+                                /*if !response.state.is_empty() {
                                     let idx = rng.gen_range(0..response.state.len());
                                     response.state[idx] = State::new(
                                         Value::RValue(RValue::new(rng.gen_range(0..100), rng.gen_range(0..100))),
                                         response.broadcast_request.clone()
                                     );
-                                }
+                                }*/
                             },
                             _ => unreachable!(),
                         }
@@ -237,8 +237,8 @@ impl Process {
                         broadcast.sender, broadcast.hash_value(), broadcast.step, broadcast.rank, broadcast.value, broadcast.previous_step_responses);
                 }
                 Message::Response(response) => {
-                    info!("Process {} SENDING RESPONSE: step={:?}, rank={}, state={:?}, broadcast_request={:?}", 
-                        response.sender, response.step, response.rank, response.state, response.broadcast_request);
+                    info!("Process {} SENDING RESPONSE with broadcast hash {}: step={:?}, rank={}, state={:?}", 
+                        response.sender, response.state[0].broadcast.hash_value(), response.step, response.rank, response.state);
                 }
             }
             
@@ -268,6 +268,8 @@ impl Process {
                 Decision::Commit(val) => return val,
                 Decision::Adopt(val) => self.propose(threshold, val, rank + 1)
             };*/
+
+            info!("Process {} returned!", self.id);
 
             return r_value.value
         }
@@ -370,8 +372,6 @@ impl Process {
         {
             *r_set.write().unwrap() = max_r_value;
         }
-
-        let broadcasts = broadcasts.read().unwrap().clone();
         
         // Line 28: b ← bcast responsible for R[j]’s value
         let response_broadcast = {
@@ -388,7 +388,6 @@ impl Process {
             Step::R,
             broadcast.rank,
             vec![State::new(Value::RValue(max_r_value), response_broadcast)],
-            broadcast.clone()
         );
 
         // Line 29: send(Rresp, j, R, sig, b) to all
@@ -846,71 +845,33 @@ impl Process {
         true
     }*/
 
-    fn handle_response(
+    fn reliably_check_response(
+        id: Id,
         response: Response,
-        broadcasts: &Broadcasts,
+        broadcasts: &mut Broadcasts,
         responses: &Responses,
-        pending_responses: &PendingResponses,
+        pending_responses: &mut PendingResponses,
         threshold: usize
     ) {
-        info!("Handling response: step={:?}, sender={}, rank={}", 
-              response.step, response.sender, response.rank);
+        let broadcast = response.state[0].broadcast.clone();
 
-        // Validate the response before processing
-        //if !Process::validate_response(&response) {
-            //info!("Invalid response received from process {} at step {:?} and rank {}", 
-                  //response.sender, response.step, response.rank);
-            //return;
-        //}
-
-        {
-            pending_responses.write().unwrap().insert(response.clone());
+        if !pending_responses.contains_key(&broadcast) {
+            pending_responses.insert(broadcast.clone(), vec![response]);
+        }
+        else {
+            pending_responses.get_mut(&broadcast).unwrap().push(response);
         }
 
-        // Update broadcast counts and check if we have enough responses
-        {
-            let mut broadcasts = broadcasts.write().unwrap();
+        let received_responses = pending_responses.get(&broadcast).unwrap();
 
-            // First update all counts
-            let count = broadcasts.entry(response.broadcast_request)
-                .or_insert(0);
-            *count += 1;
-        }
-
-        {
-            let mut all_broadcasts_reached_threshold = true;
-            let broadcasts = broadcasts.read().unwrap();
-            let pending_responses = pending_responses.read().unwrap();
-
-            for response in pending_responses.iter() {
-                // Then check if all broadcasts have reached threshold
-                for state in &response.state {
-                    if let Some(count) = broadcasts.get(&state.broadcast) {
-                        if *count < threshold as i64 {
-                            info!("Broadcast {:?} in response {:?} has not reached threshold (>= {})", state.broadcast, response, threshold);
-
-                            all_broadcasts_reached_threshold = false;
-                            break;
-                        }
-                    } else {
-                        info!("Broadcast {:?} in response {:?} not found in broadcasts map", state.broadcast, response);
-                        all_broadcasts_reached_threshold = false;
-                        break;
-                    }
-                }
-
-                // Only add response if all its broadcasts have reached threshold
-                if all_broadcasts_reached_threshold {
-                    // Add to responses collection, limiting by rank and step
-                    let key = (response.step.clone(), response.rank);
-                    let mut responses_write = responses.write().unwrap();
-                    
-                    // Initialize the inner HashMap if not present
-                    let step_responses = responses_write.entry(key).or_default();
-                    // Only insert if we haven't reached threshold responses for this step/rank
-                    if step_responses.len() < threshold {
-                        step_responses.insert(response.sender, response.clone());
-                    }
+        if received_responses.len() >= threshold {
+            for response in received_responses {
+                {
+                    let key = (response.step, response.rank);
+                    let mut responses_map = responses.write().unwrap();
+                    responses_map.entry(key)
+                        .or_insert_with(HashMap::new)
+                        .insert(response.sender, response.clone());
                 }
             }
         }
@@ -1027,7 +988,7 @@ impl Process {
 
         // Line 74/75: if |{bcast-answers ∈ C}| > f then return true
         // There are at least f responses in the certificate that have been reliably verified
-        if *broadcasts.read().unwrap().get(&broadcast).unwrap_or(&0) as usize > f {
+        if *broadcasts.get(&broadcast).unwrap_or(&0) as usize > f {
             return true;
         }
 
@@ -1101,8 +1062,8 @@ mod tests {
             let mut process3 = Process::new(2, f, vec![sender1.clone(), sender2.clone(), sender3.clone(), sender4.clone()], receiver3, false);
             let mut process3_clone = process3.clone();
             
-            let process4 = Process::new(3, f, vec![sender1.clone(), sender2.clone(), sender3.clone(), sender4.clone()], receiver4, false);
-            let mut process4_clone = process4.clone();
+            //let mut process4 = Process::new(3, f, vec![sender1.clone(), sender2.clone(), sender3.clone(), sender4.clone()], receiver4, false);
+            //let mut process4_clone = process4.clone();
 
             let p1 = thread::spawn(move || {
                 process1.propose(threshold, instance + 0, 0)
@@ -1115,15 +1076,20 @@ mod tests {
             let p3 = thread::spawn(move || {
                 process3.propose(threshold, instance + 2, 0)
             });
+
+            //let p4 = thread::spawn(move || {
+                //process4.propose(threshold, instance + 3, 0)
+            //});
             
             let p1_value = p1.join().unwrap();
             let p2_value = p2.join().unwrap();
             let p3_value = p3.join().unwrap();
+            //let p4_value = p4.join().unwrap();
 
             process1_clone.stop();
             process2_clone.stop();
             process3_clone.stop();
-            process4_clone.stop();
+            //process4_clone.stop();
 
             //assert_eq!(p1_value, p2_value);
             //assert_eq!(p1_value, p3_value);

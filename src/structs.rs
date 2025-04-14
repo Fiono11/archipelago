@@ -25,7 +25,8 @@ pub struct Broadcast {
 impl Hash for Broadcast {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.step.hash(state);
-        self.sender.hash(state);
+        self.value.hash(state);
+        self.flag.hash(state);
         self.rank.hash(state);
     }
 }
@@ -46,30 +47,30 @@ impl Broadcast {
 }
 
 // Page 25 of the technical report: "Since processes can only ever send one B-answer to each process..."
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct Response {
     pub sender: Id,
     pub step: Step, 
     pub rank: Rank,
     pub state: Vec<State>,
-    pub broadcast_request: Broadcast,
+    //pub broadcast_request: Broadcast,
 }
 
 impl Response {
-    pub fn new(sender: Id, step: Step, rank: Rank, state: Vec<State>, broadcast_request: Broadcast) -> Self {
-        Self { sender, step, rank, state, broadcast_request }
+    pub fn new(sender: Id, step: Step, rank: Rank, state: Vec<State>) -> Self {
+        Self { sender, step, rank, state }
     }
 }
 
-impl Hash for Response {
+/*impl Hash for Response {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.step.hash(state);
         self.sender.hash(state);
         self.rank.hash(state);
     }
-}
+}*/
 
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone, Hash, Eq, PartialEq, Copy)]
 pub enum Step {
     R, 
     A, 
@@ -178,4 +179,137 @@ impl BState {
 pub enum Decision {
     Adopt(i64),
     Commit(i64),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_broadcast_hash_value() {
+        // Create two identical broadcasts
+        let broadcast1 = Broadcast::new(
+            1,
+            Step::R,
+            42,
+            Some(true),
+            5,
+            None,
+        );
+
+        let broadcast2 = Broadcast::new(
+            1,
+            Step::R,
+            42,
+            Some(true),
+            5,
+            None,
+        );
+
+        // Create a different broadcast
+        let broadcast3 = Broadcast::new(
+            1,
+            Step::R,
+            43, // Different value
+            Some(true),
+            5,
+            None,
+        );
+
+        // Hash values of identical broadcasts should be equal
+        assert_eq!(broadcast1.hash_value(), broadcast2.hash_value());
+        
+        // Hash values of different broadcasts should be different
+        assert_ne!(broadcast1.hash_value(), broadcast3.hash_value());
+
+        // Verify that the sender is not part of the hash
+        let broadcast4 = Broadcast::new(
+            2, // Different sender
+            Step::R,
+            42,
+            Some(true),
+            5,
+            None,
+        );
+        assert_eq!(broadcast1.hash_value(), broadcast4.hash_value());
+
+        // Verify that previous_step_responses is not part of the hash
+        let broadcast5 = Broadcast::new(
+            1,
+            Step::R,
+            42,
+            Some(true),
+            5,
+            Some(vec![Response::new(1, Step::R, 5, vec![])])
+        );
+        assert_eq!(broadcast1.hash_value(), broadcast5.hash_value());
+    }
+
+    #[test]
+    fn test_response_hash() {
+        // Create two identical responses
+        let response1 = Response::new(
+            1,
+            Step::R,
+            5,
+            vec![],
+        );
+
+        let response2 = Response::new(
+            1,
+            Step::R,
+            5,
+            vec![],
+        );
+
+        // Create a response with a different sender
+        let response3 = Response::new(
+            2,
+            Step::R, // Different step
+            5,
+            vec![],
+        );
+
+        // Hash values of identical responses should be equal
+        let hash1 = {
+            let mut hasher = DefaultHasher::new();
+            response1.hash(&mut hasher);
+            hasher.finish()
+        };
+
+        let hash2 = {
+            let mut hasher = DefaultHasher::new();
+            response2.hash(&mut hasher);
+            hasher.finish()
+        };
+
+        let hash3 = {
+            let mut hasher = DefaultHasher::new();
+            response3.hash(&mut hasher);
+            hasher.finish()
+        };
+
+        assert_eq!(hash1, hash2);
+        assert_ne!(hash1, hash3);
+
+        // Test that response with different state has different hash
+        let state = State::new(
+            Value::RValue(RValue::new(5, 42)),
+            Broadcast::new(1, Step::R, 42, Some(true), 5, None)
+        );
+        let response4 = Response::new(
+            1,
+            Step::R,
+            5,
+            vec![state],
+        );
+
+        let hash4 = {
+            let mut hasher = DefaultHasher::new();
+            response4.hash(&mut hasher);
+            hasher.finish()
+        };
+
+        assert_ne!(hash1, hash4);
+    }
 }
