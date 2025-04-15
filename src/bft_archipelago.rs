@@ -266,6 +266,8 @@ impl Process {
                 Decision::Commit(val) => return val,
                 Decision::Adopt(val) => self.propose(threshold, val, rank + 1)
             };
+
+            //return (flag, a_value);
         }
     }
 
@@ -730,7 +732,9 @@ impl Process {
 
             b_state.push(State::new(Value::BValue(b_value_true), response_broadcast_true));
         
-            let b_value_false = *false_pairs[0];
+            let b_value_false = *false_pairs.iter()
+                .max_by_key(|b_state| b_state.value)
+                .unwrap();
 
             let response_broadcast_false = broadcasts
                 .iter()
@@ -739,7 +743,7 @@ impl Process {
                 .0
                 .clone();
 
-            b_state.push(State::new(Value::BValue(b_value_false), response_broadcast_false));
+            b_state.push(State::new(Value::BValue(*b_value_false), response_broadcast_false));
 
             let response = Response::new(
                 id, 
@@ -853,7 +857,8 @@ impl Process {
                     let mut responses_map = responses.write().unwrap();
                     responses_map.entry(key)
                         .or_insert_with(HashMap::new)
-                        .insert(resp.sender, resp.clone());
+                        .entry(resp.sender)
+                        .or_insert_with(|| resp.clone());
                 }
             }
         }
@@ -1073,8 +1078,16 @@ mod tests {
             process3_clone.stop();
             //process4_clone.stop();
 
-            //assert_eq!(p1_value, p2_value);
-            //assert_eq!(p1_value, p3_value);
+            assert_eq!(p1_value, p2_value);
+            assert_eq!(p1_value, p3_value);
+
+            /*if p1_value.0 && p2_value.0 {
+                assert_eq!(p1_value.1, p2_value.1);
+            }
+
+            if p1_value.0 && p3_value.0 {
+                assert_eq!(p1_value.1, p3_value.1);
+            }*/
         }
     }
 }
