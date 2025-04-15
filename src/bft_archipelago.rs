@@ -122,14 +122,12 @@ impl Process {
                         info!("Process {} RECEIVED BROADCAST with hash {}: step={:?}, sender={}, rank={}, value={}, previous_step_responses={:?}", 
                             id, broadcast.hash_value(), broadcast.step, broadcast.sender, broadcast.rank, broadcast.value, broadcast.previous_step_responses);
 
-                        broadcasts.entry(broadcast.clone()).or_insert(0);
-
-                        assert!(broadcasts.len() <= 3);
-
                         // Lines 26, 42, 62
                         let is_reliable = Process::reliably_check_broadcast(&broadcast, &broadcasts, f, &r_set);
 
                         if is_reliable {
+                            broadcasts.entry(broadcast.clone()).or_insert(0);
+
                             // Process the reliable broadcast
                             match broadcast.step {
                                 Step::R => {
@@ -258,10 +256,10 @@ impl Process {
             let r_value = self.r_step(threshold, RValue::new(rank, value));
 
             // A Step
-            /*let (flag, a_value) = self.a_step(threshold, r_value);
+            let (flag, a_value) = self.a_step(threshold, r_value);
 
             // B Step
-            let decision = self.b_step(threshold, r_value.rank, flag, a_value);
+            /*let decision = self.b_step(threshold, r_value.rank, flag, a_value);
             
             // Return decision result
             match decision {
@@ -488,21 +486,20 @@ impl Process {
         
         // First, check if we need to update a_sets
         {
-            let mut a_sets_write = a_sets.write().unwrap().clone();
+            let mut a_sets_write = a_sets.write().unwrap();
             if a_sets_write.len() > j {
-                let mut current_set = a_sets_write;
-                    // Line 43: if v /∈ A[j] and |A[j]| < 2
-                    if !current_set.contains(&broadcast_value) && current_set.len() < 2 {
-                        // Line 44: add v to A[j]
-                        current_set.push(broadcast_value);
-                    // Line 45: v > max(A[j])
-                    } else if broadcast_value > *current_set.iter().max().unwrap() {
-                        let min = current_set.iter().min().unwrap();
-                        if let Some(index) = current_set.iter().position(|&x| x == *min) {
-                            // Line 46: min(A[j]) ← v
-                            current_set[index] = broadcast_value;
-                        }
+                // Line 43: if v /∈ A[j] and |A[j]| < 2
+                if !a_sets_write.contains(&broadcast_value) && a_sets_write.len() < 2 {
+                    // Line 44: add v to A[j]
+                    a_sets_write.push(broadcast_value);
+                // Line 45: v > max(A[j])
+                } else if broadcast_value > *a_sets_write.iter().max().unwrap() {
+                    let min = a_sets_write.iter().min().unwrap();
+                    if let Some(index) = a_sets_write.iter().position(|&x| x == *min) {
+                        // Line 46: min(A[j]) ← v
+                        a_sets_write[index] = broadcast_value;
                     }
+                }
             }
             else {
                 a_sets_write.push(broadcast_value);

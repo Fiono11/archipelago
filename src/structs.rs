@@ -62,14 +62,6 @@ impl Response {
     }
 }
 
-/*impl Hash for Response {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.step.hash(state);
-        self.sender.hash(state);
-        self.rank.hash(state);
-    }
-}*/
-
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Copy)]
 pub enum Step {
     R, 
