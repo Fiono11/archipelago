@@ -259,7 +259,7 @@ impl Process {
             let (flag, a_value) = self.a_step(threshold, r_value);
 
             // B Step
-            //let decision = self.b_step(threshold, r_value.rank, flag, a_value);
+            let decision = self.b_step(threshold, r_value.rank, flag, a_value);
             
             // Return decision result
             /*match decision {
@@ -418,7 +418,7 @@ impl Process {
 
         let key = (Step::A, rank);
 
-        // Collect the R values from the responses
+        // Collect the A values from the responses
         loop {
             let responses = self.responses.read().unwrap();
             if responses.get(&key).map(|m| m.len()).unwrap_or(0) == threshold {
@@ -561,72 +561,67 @@ impl Process {
         // Line 52: broadcast(B, i, , v, C)
         Process::send_message(&self.senders, &mut Message::Broadcast(broadcast), self.byzantine);
         
-        let mut b_values = Vec::new();
-        let mut unique_processes = HashSet::new();
+        let key = (Step::B, rank);
 
         info!("Process {} waiting for {} B responses", self.id, threshold);
 
         // Line 53/54:  wait until receive valid (Bresp, i, B[i]) from 2f + 1 proc.
-        while b_values.len() < threshold {
-            let key = (Step::B, rank);
-            let b_responses = {
-                let responses_read = self.responses.read().unwrap();
-                if let Some(step_responses) = responses_read.get(&key) {
-                    step_responses.values().cloned().collect::<Vec<Response>>()
-                } else {
-                    Vec::new()
-                }
-            };
-
-            for b_response in b_responses {
-                if unique_processes.insert(b_response.sender) {
-                    for b_state in &b_response.state {
-                        if let Value::BValue(b_value) = b_state.value {
-                            // Line 55: S ← array with all B[i]s received
-                            b_values.push(b_value);
+        loop {
+            let responses = self.responses.read().unwrap();
+            if responses.get(&key).map(|m| m.len()).unwrap_or(0) == threshold {
+                // Collect the B values from the responses
+                let b_values: Vec<BValue> = responses.get(&key)
+                    .unwrap()
+                    .values()
+                    .filter_map(|response| {
+                        for state in &response.state {
+                            if let Value::BValue(b_value) = state.value {
+                                return Some(b_value);
+                            }
                         }
-                    }
-                }
+                        None
+                    })
+                    .collect();
+
+                // Count how many true values exist
+                let true_values: Vec<&BValue> = b_values.iter()
+                    .filter(|&b_value| b_value.flag)
+                    .collect();
+
+            info!("Process {}: Found {} true values", self.id, true_values.len());
+            
+            // Line 56: if |{⟨true, val⟩ ∈ S}| ≥ 2f + 1
+            if true_values.len() >= threshold {
+                let value = true_values.first().unwrap().value;
+                info!("Process {} returned COMMIT and value {:?} in B step in rank {}", 
+                    self.id, value, rank);
+
+                // Line 57: return ⟨commit, val⟩
+                return Decision::Commit(value)
+            }
+            // Line 58: else if |{⟨true, val⟩ ∈ S}| ≥ 1 then
+            else if !true_values.is_empty() {
+                let value = true_values.first().unwrap().value;
+                info!("Process {} returned ADOPT and value {:?} in B step in rank {}", 
+                    self.id, value, rank);
+                
+                // Line 59: return ⟨adopt, val⟩
+                return Decision::Adopt(value);
+            }
+            else {
+                let max_value = b_values.iter()
+                    .max_by_key(|b_value| b_value.value)
+                    .map(|b_value| b_value.value)
+                    .unwrap();
+                
+                info!("Process {} returned ADOPT and value {:?} in B step in rank {}", 
+                    self.id, max_value, rank);
+
+                // Line 60: else return ⟨adopt, max(S)⟩
+                return Decision::Adopt(max_value);
+            }
             }
         } 
-
-        // Count how many true values exist
-        let true_values: Vec<&BValue> = b_values.iter()
-            .filter(|b_value| b_value.flag)
-            .collect();
-
-        info!("Process {}: Found {} true values", self.id, true_values.len());
-        
-        // Line 56: if |{⟨true, val⟩ ∈ S}| ≥ 2f + 1
-        if true_values.len() >= threshold {
-            let value = true_values.first().unwrap().value;
-            info!("Process {} returned COMMIT and value {:?} in B step in rank {}", 
-                  self.id, value, rank);
-
-            // Line 57: return ⟨commit, val⟩
-            Decision::Commit(value)
-        }
-        // Line 58: else if |{⟨true, val⟩ ∈ S}| ≥ 1 then
-        else if !true_values.is_empty() {
-            let value = true_values.first().unwrap().value;
-            info!("Process {} returned ADOPT and value {:?} in B step in rank {}", 
-                  self.id, value, rank);
-            
-            // Line 59: return ⟨adopt, val⟩
-            return Decision::Adopt(value);
-        }
-        else {
-            let max_value = b_values.iter()
-                .max_by_key(|b_value| b_value.value)
-                .map(|b_value| b_value.value)
-                .unwrap();
-            
-            info!("Process {} returned ADOPT and value {:?} in B step in rank {}", 
-                  self.id, max_value, rank);
-
-            // Line 60: else return ⟨adopt, max(S)⟩
-            return Decision::Adopt(max_value);
-        }
     }
 
     fn answer_b_broadcast(
