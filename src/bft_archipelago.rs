@@ -259,10 +259,10 @@ impl Process {
             let (flag, a_value) = self.a_step(threshold, r_value);
 
             // B Step
-            /*let decision = self.b_step(threshold, r_value.rank, flag, a_value);
+            //let decision = self.b_step(threshold, r_value.rank, flag, a_value);
             
             // Return decision result
-            match decision {
+            /*match decision {
                 Decision::Commit(val) => return val,
                 Decision::Adopt(val) => self.propose(threshold, val, rank + 1)
             };*/
@@ -288,16 +288,16 @@ impl Process {
             info!("Process {} waiting for {} B responses from rank {}", 
                   self.id, threshold, rank - 1);
 
-                  let key = (Step::B, rank - 1);
+            let key = (Step::B, rank - 1);
 
-                  loop {
-                      let responses = self.responses.read().unwrap();
-                      if responses.get(&key).map(|m| m.len()).unwrap_or(0) == threshold {
-                          break;
-                      }
-                  }
+            loop {
+                let responses = self.responses.read().unwrap();
+                if responses.get(&key).map(|m| m.len()).unwrap_or(0) == threshold {
+                    break;
+                }
+            }
                                 
-                  let responses = self.responses.read().unwrap().get(&key).unwrap().values().cloned().collect();
+            let responses = self.responses.read().unwrap().get(&key).unwrap().values().cloned().collect();
                     
             let broadcast = Broadcast::new(self.id, Step::R, value, None, rank, Some(responses));
             
@@ -309,31 +309,33 @@ impl Process {
             Process::send_message(&self.senders, &mut Message::Broadcast(broadcast), self.byzantine);
         }
 
-        let mut r_values = Vec::new();
-        let mut unique_processes = HashSet::new();
-
         // Line 18/19: wait until (receive valid (Rresp, i, R, C) from 2f + 1 processes)
-        while r_values.len() < threshold {
-            let key = (Step::R, rank);
-            let r_responses = {
-                let responses_read = self.responses.read().unwrap();
-                if let Some(step_responses) = responses_read.get(&key) {
-                    step_responses.values().cloned().collect::<Vec<Response>>()
-                } else {
-                    Vec::new()
-                }
-            };
+        let key = (Step::R, rank);
 
-            for r_response in &r_responses {
-                if unique_processes.insert(r_response.sender) {
-                    if let Value::RValue(r_value) = r_response.state[0].value {
-                        r_values.push(r_value);
-                    }
-                }
+        loop {
+            let responses = self.responses.read().unwrap();
+            if responses.get(&key).map(|m| m.len()).unwrap_or(0) == threshold {
+                // Collect the R values from the responses
+                let r_values: Vec<RValue> = responses.get(&key)
+                    .unwrap()
+                    .values()
+                    .filter_map(|response| {
+                        for state in &response.state {
+                            if let Value::RValue(r_value) = state.value {
+                                return Some(r_value);
+                            }
+                        }
+                        None
+                    })
+                    .collect();
+                
+                info!("Process {} collected {} R values in rank {}", 
+                      self.id, r_values.len(), rank);
+                
+                // Return the maximum of all R values
+                return *r_values.iter().max().unwrap();
             }
-        } 
-
-        Process::r_max(r_values, &self.r_set)
+        }
     }
 
     fn r_max(r_values: Vec<RValue>, r_set: &R) -> RValue {
@@ -400,77 +402,74 @@ impl Process {
         info!("Process {} starting A-step with rank {} and value {}", 
               self.id, rank, value);
 
-              let key = (Step::R, rank);
+        let key = (Step::R, rank);
 
-              // Line 32: compile certificate C
-              let responses = self.responses.read().unwrap().get(&key).unwrap().values().cloned().collect();
+        // Line 32: compile certificate C
+        let responses = self.responses.read().unwrap().get(&key).unwrap().values().cloned().collect();
         
         let broadcast = Broadcast::new(self.id, Step::A, value, None, rank, Some(responses));
 
         // Line 33: broadcast(A, i, v, C)
         Process::send_message(&self.senders, &mut Message::Broadcast(broadcast), self.byzantine);
         
-        let mut a_values: Vec<AValue> = Vec::new();
-        let mut unique_processes = HashSet::new();
-
         info!("Process {} waiting for {} A responses", self.id, threshold);
 
         // Lines 34/35:  wait until receive valid (Aresp, i, A[i]) 35: from 2f + 1 processes
-        while a_values.len() < threshold {
-            let key = (Step::A, rank);
-            let a_responses = {
-                let responses_read = self.responses.read().unwrap();
-                if let Some(step_responses) = responses_read.get(&key) {
-                    step_responses.values().cloned().collect::<Vec<Response>>()
-                } else {
-                    Vec::new()
-                }
-            };
 
-            // Line 36: S ← union of all A[i]s received
-            for a_response in &a_responses {
-                if unique_processes.insert(a_response.sender) {
-                    for a_state in &a_response.state {
-                        if let Value::AValue(a_value) = a_state.value {
-                            a_values.push(a_value);
+        let key = (Step::A, rank);
+
+        // Collect the R values from the responses
+        loop {
+            let responses = self.responses.read().unwrap();
+            if responses.get(&key).map(|m| m.len()).unwrap_or(0) == threshold {
+                // Collect the R values from the responses
+                let a_values: Vec<AValue> = responses.get(&key)
+                    .unwrap()
+                    .values()
+                    .filter_map(|response| {
+                        for state in &response.state {
+                            if let Value::AValue(a_value) = state.value {
+                                return Some(a_value);
+                            }
                         }
+                        None
+                    })
+                    .collect();
+                
+                 // Count occurrences of each value in the A-answers
+                let mut value_counts: HashMap<AValue, usize> = HashMap::new();
+                let mut max_value = AValue(value);
+
+                for a_value in &a_values {
+                    *value_counts.entry(*a_value).or_insert(0) += 1;
+                    
+                    // Track the maximum value
+                    if a_value.0 > max_value.0 {
+                        max_value = *a_value;
                     }
                 }
-            }
-        }
 
-        // Count occurrences of each value in the A-answers
-        let mut value_counts: HashMap<AValue, usize> = HashMap::new();
-        let mut max_value = AValue(value);
+                info!("Process {}: Value counts: {:?}", self.id, value_counts);
+                info!("Process {}: Max value found: {}", self.id, max_value.0);
 
-        for a_value in &a_values {
-            *value_counts.entry(*a_value).or_insert(0) += 1;
-            
-            // Track the maximum value
-            if a_value.0 > max_value.0 {
-                max_value = *a_value;
-            }
-        }
+                // Line 37/38: if (S contains at least 2f+1 A-answers containing only val)
+                for (val, count) in value_counts.iter() {
+                    if *count >= threshold {
+                        info!("Process {} returned flag {} and value {:?} in A step in rank {}", 
+                            self.id, true, val.0, rank);
+                        
+                        // Line 39: return ⟨true, val⟩
+                        return (true, val.0);
+                    }
+                }
 
-        info!("Process {}: Value counts: {:?}", self.id, value_counts);
-        info!("Process {}: Max value found: {}", self.id, max_value.0);
-
-        // Line 37/38: if (S contains at least 2f+1 A-answers containing only val)
-        for (val, count) in value_counts.iter() {
-            if *count >= threshold {
                 info!("Process {} returned flag {} and value {:?} in A step in rank {}", 
-                      self.id, true, val.0, rank);
-                
-                // Line 39: return ⟨true, val⟩
-                return (true, val.0);
+                    self.id, false, max_value.0, rank);
+
+                // Line 40:  else return ⟨false, max(S)⟩
+                return (false, max_value.0)
             }
         }
-
-        info!("Process {} returned flag {} and value {:?} in A step in rank {}", 
-              self.id, false, max_value.0, rank);
-
-        // Line 40:  else return ⟨false, max(S)⟩
-        (false, max_value.0)
     }
 
     fn answer_a_broadcast(
@@ -851,7 +850,7 @@ impl Process {
             info!("Process {}: Current pending responses count: {}/{}", 
                 id, received_responses.len(), threshold);
                 
-            if received_responses.len() >= threshold {
+            //if received_responses.len() >= threshold {
                 info!("Process {}: Threshold reached for responses ({}), storing in responses map", 
                     id, threshold);
                     
@@ -863,7 +862,7 @@ impl Process {
                         .or_insert_with(HashMap::new)
                         .insert(resp.sender, resp.clone());
                 }
-            }
+            //}
         }
     }
 
