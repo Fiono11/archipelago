@@ -855,10 +855,12 @@ impl Process {
                 for resp in received_responses {
                     let key = (resp.step.clone(), resp.rank);
                     let mut responses_map = responses.write().unwrap();
-                    responses_map.entry(key)
-                        .or_insert_with(HashMap::new)
-                        .entry(resp.sender)
-                        .or_insert_with(|| resp.clone());
+                    let entry = responses_map.entry(key).or_insert_with(HashMap::new);
+                    
+                    // Only add if we don't have a response from this sender yet and we're below threshold
+                    if !entry.contains_key(&resp.sender) && entry.len() < threshold {
+                        entry.insert(resp.sender, resp.clone());
+                    }
                 }
             }
         }
@@ -1049,8 +1051,8 @@ mod tests {
             let mut process3 = Process::new(2, f, vec![sender1.clone(), sender2.clone(), sender3.clone(), sender4.clone()], receiver3, false);
             let mut process3_clone = process3.clone();
             
-            //let mut process4 = Process::new(3, f, vec![sender1.clone(), sender2.clone(), sender3.clone(), sender4.clone()], receiver4, false);
-            //let mut process4_clone = process4.clone();
+            let mut process4 = Process::new(3, f, vec![sender1.clone(), sender2.clone(), sender3.clone(), sender4.clone()], receiver4, false);
+            let mut process4_clone = process4.clone();
 
             let p1 = thread::spawn(move || {
                 process1.propose(threshold, instance + 0, 0)
@@ -1064,19 +1066,19 @@ mod tests {
                 process3.propose(threshold, instance + 2, 0)
             });
 
-            //let p4 = thread::spawn(move || {
-                //process4.propose(threshold, instance + 3, 0)
-            //});
+            let p4 = thread::spawn(move || {
+                process4.propose(threshold, instance + 3, 0)
+            });
             
             let p1_value = p1.join().unwrap();
             let p2_value = p2.join().unwrap();
             let p3_value = p3.join().unwrap();
-            //let p4_value = p4.join().unwrap();
+            let p4_value = p4.join().unwrap();
 
             process1_clone.stop();
             process2_clone.stop();
             process3_clone.stop();
-            //process4_clone.stop();
+            process4_clone.stop();
 
             assert_eq!(p1_value, p2_value);
             assert_eq!(p1_value, p3_value);
