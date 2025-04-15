@@ -262,14 +262,10 @@ impl Process {
             let decision = self.b_step(threshold, r_value.rank, flag, a_value);
             
             // Return decision result
-            /*match decision {
+            match decision {
                 Decision::Commit(val) => return val,
                 Decision::Adopt(val) => self.propose(threshold, val, rank + 1)
-            };*/
-
-            info!("Process {} returned!", self.id);
-
-            return r_value.value
+            };
         }
     }
 
@@ -1075,8 +1071,8 @@ mod tests {
             process3_clone.stop();
             //process4_clone.stop();
 
-            //assert_eq!(p1_value, p2_value);
-            //assert_eq!(p1_value, p3_value);
+            assert_eq!(p1_value, p2_value);
+            assert_eq!(p1_value, p3_value);
         }
     }
 }
