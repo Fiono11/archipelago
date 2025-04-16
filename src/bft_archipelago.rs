@@ -410,58 +410,58 @@ impl Process {
 
         let key = (Step::A, rank);
 
-        // Collect the A values from the responses
         loop {
             let responses = self.responses.read().unwrap();
             if responses.get(&key).map(|m| m.len()).unwrap_or(0) == threshold {
-                // Collect the R values from the responses
-                let a_values: Vec<AValue> = responses.get(&key)
+                // Get responses as a Vec
+                let response_vec = responses.get(&key)
                     .unwrap()
                     .values()
-                    .filter_map(|response| {
-                        for state in &response.state {
-                            if let Value::AValue(a_value) = state.value {
-                                return Some(a_value);
-                            }
-                        }
-                        None
-                    })
-                    .collect();
+                    .cloned()
+                    .collect::<Vec<Response>>();
                 
-                 // Count occurrences of each value in the A-answers
-                let mut value_counts: HashMap<AValue, usize> = HashMap::new();
-                let mut max_value = AValue(value);
-
-                for a_value in &a_values {
-                    *value_counts.entry(*a_value).or_insert(0) += 1;
-                    
-                    // Track the maximum value
-                    if a_value.0 > max_value.0 {
-                        max_value = *a_value;
-                    }
-                }
-
-                info!("Process {}: Value counts: {:?}", self.id, value_counts);
-                info!("Process {}: Max value found: {}", self.id, max_value.0);
-
-                // Line 37/38: if (S contains at least 2f+1 A-answers containing only val)
-                for (val, count) in value_counts.iter() {
-                    if *count >= threshold {
-                        info!("Process {} returned flag {} and value {:?} in A step in rank {}", 
-                            self.id, true, val.0, rank);
-                        
-                        // Line 39: return ⟨true, val⟩
-                        return (true, val.0);
-                    }
-                }
-
-                info!("Process {} returned flag {} and value {:?} in A step in rank {}", 
-                    self.id, false, max_value.0, rank);
-
-                // Line 40:  else return ⟨false, max(S)⟩
-                return (false, max_value.0)
+                return Self::process_a_responses(&response_vec, threshold);
             }
         }
+    }
+
+    fn process_a_responses(responses: &Vec<Response>, threshold: usize) -> (bool, i64) {
+        // Collect the A values from the responses
+        let a_values: Vec<AValue> = responses
+            .iter()
+            .filter_map(|response| {
+                for state in &response.state {
+                    if let Value::AValue(a_value) = state.value {
+                        return Some(a_value);
+                    }
+                }
+                None
+            })
+            .collect();
+        
+        // Count occurrences of each value in the A-answers
+        let mut value_counts: HashMap<AValue, usize> = HashMap::new();
+        let mut max_value = a_values.first().map_or(AValue(0), |v| *v);
+
+        for a_value in &a_values {
+            *value_counts.entry(*a_value).or_insert(0) += 1;
+            
+            // Track the maximum value
+            if a_value.0 > max_value.0 {
+                max_value = *a_value;
+            }
+        }
+
+        // Line 37/38: if (S contains at least 2f+1 A-answers containing only val)
+        for (val, count) in value_counts.iter() {
+            if *count >= threshold {
+                // Line 39: return ⟨true, val⟩
+                return (true, val.0);
+            }
+        }
+
+        // Line 40:  else return ⟨false, max(S)⟩
+        (false, max_value.0)
     }
 
     fn answer_a_broadcast(
@@ -908,8 +908,9 @@ impl Process {
                 if broadcast.flag.is_none() {
                     return false;
                 }
-
-                true
+                else {
+                    Process::process_a_responses(&responses, threshold) == (broadcast.flag.unwrap(), broadcast.value)
+                }
             }
         }
     }
