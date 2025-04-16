@@ -14,7 +14,6 @@ pub enum Message {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Broadcast {
     pub sender: Id,
-    //pub register: Vec<Vec<Value>>,
     pub step: Step,
     pub value: i64,
     pub flag: Option<bool>,
@@ -53,7 +52,6 @@ pub struct Response {
     pub step: Step, 
     pub rank: Rank,
     pub state: Vec<State>,
-    //pub broadcast_request: Broadcast,
 }
 
 impl Response {

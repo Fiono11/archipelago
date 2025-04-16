@@ -1,35 +1,34 @@
 use std::{cmp::max, collections::{BTreeSet, HashMap, HashSet}, sync::{atomic::{AtomicBool, Ordering}, mpsc::{Receiver, Sender}, Arc, RwLock}, thread};
 use crate::{AValue, BValue, Broadcast, BroadcastHash, Decision, Id, Message, RValue, Rank, Response, State, Step, Value};
-use log::info;
 use rand::{self, Rng};
 
 // Each process receives 2f+1 responses per step and rank 
 type Responses = Arc<RwLock<HashMap<(Step, Rank), HashMap<Id, Response>>>>;
 
 // In the first step of rank i, each process: 
-// 1) Broadcasts its R
+// 1) Broadcasts its rank i, value v and an optional certificate containing responses of step B and rank i-1 from 2f+1 processes (if i > 0)
 // 2) Waits valid responses from 2f+1 processes 
-// 3) Keeps the maximum value v in R
-// 4) Returns (i, v)
+// 3) Keeps the maximum RValue v'
+// 4) Returns (i, v')
 type R = Arc<RwLock<RValue>>;
 
 // In the second step of rank i, each process: 
-// 1) Broadcasts its A
+// 1) Broadcasts its rank i, value v and a certificate containing responses of step R and rank i from 2f+1 processes 
 // 2) Waits valid responses from 2f+1 processes 
-// 3) Keeps the two highest values in A
+// 3) Keeps the the greatest AValue or the two greatest if there are different values
 // 4) According to the received AResponses, it returns:
-// - (true, v) if there is only one value v 
-// - (false, max(A)) otherwise
+// - (true, v) if there is only one Avalue v 
+// - (false, max(v)), otherwise
 type A = Arc<RwLock<Vec<AValue>>>;
 
 // In the third step of rank i, each process: 
-// 1) Broadcasts its B
+// 1) Broadcasts its rank i, value v, a boolean flag and a certificate containing responses of step R and rank i from 2f+1 processes 
 // 2) Waits valid responses from 2f+1 processes
 // 3) Keeps the (true, v) pair and the highest (false, pair), if there is one
 // 4) According to the received BResponses, it returns:
 // - (commit, v) if there are at least 2f+1 (commit, v)
 // - (adopt, v) if there is at least 1 (commit, v)
-// - (adopt, max(BResponses)) otherwise
+// - (adopt, max(v)) otherwise
 type B = Arc<RwLock<Vec<BValue>>>;
 
 // Maps broadcasts to their count
@@ -41,9 +40,6 @@ type PendingResponses = HashMap<BTreeSet<BroadcastHash>, HashSet<Response>>;
 #[derive(Debug, Clone)]
 pub struct Process {
     id: Id,
-    r_set: R,
-    a_sets: A,
-    b_sets: B,
     responses: Responses,
     senders: Vec<Sender<Message>>,
     stop_flag: Arc<AtomicBool>,
@@ -58,17 +54,11 @@ impl Process {
         let r_set = Arc::new(RwLock::new(RValue::default()));
         let a_sets = Arc::new(RwLock::new(Vec::new()));
         let b_sets = Arc::new(RwLock::new(Vec::new()));
-        let r_set_clone = Arc::clone(&r_set);
-        let a_sets_clone = Arc::clone(&a_sets);
-        let b_sets_clone = Arc::clone(&b_sets);
         let stop_flag = Arc::new(AtomicBool::new(false));
         let stop_flag_clone = Arc::clone(&stop_flag);
 
         let state = Process {
             id,
-            r_set,
-            a_sets,
-            b_sets,
             responses,
             senders,
             stop_flag,
@@ -82,9 +72,9 @@ impl Process {
                 f,
                 responses_clone,
                 senders_clone,
-                r_set_clone,
-                a_sets_clone,
-                b_sets_clone,
+                r_set,
+                a_sets,
+                b_sets,
                 stop_flag_clone,
                 receiver,
                 byzantine
@@ -112,18 +102,14 @@ impl Process {
         loop {
             // Check if we should stop
             if stop_flag.load(Ordering::Relaxed) {
-                info!("Process {} received stop signal, terminating", id);
                 break;
             }
 
             if let Ok(msg) = receiver.recv() {
                 match msg {
                     Message::Broadcast(broadcast) => {                        
-                        info!("Process {} RECEIVED BROADCAST with hash {}: step={:?}, sender={}, rank={}, value={}, previous_step_responses={:?}", 
-                            id, broadcast.hash_value(), broadcast.step, broadcast.sender, broadcast.rank, broadcast.value, broadcast.previous_step_responses);
-
                         // Lines 26, 42, 62
-                        let is_reliable = Process::reliably_check_broadcast(&broadcast, &broadcasts, f, &r_set);
+                        let is_reliable = Process::reliably_check_broadcast(&broadcast, &broadcasts, f);
 
                         if is_reliable {
                             broadcasts.entry(broadcast.clone()).or_insert(0);
@@ -164,13 +150,8 @@ impl Process {
                         }          
                     }
                     Message::Response(response) => {
-                        info!("Process {} RECEIVED RESPONSE with broadcast hash {}: step={:?}, sender={}, state={:?}, rank={}", 
-                            id, response.state[0].broadcast.hash_value(), response.step, response.sender, response.state, response.rank);
-
                         Process::reliably_check_response(
-                            id,
                             response,
-                            &mut broadcasts,
                             &responses,
                             &mut pending_responses,
                             2 * f + 1
@@ -182,7 +163,6 @@ impl Process {
     }
 
     pub fn stop(&mut self) {
-        info!("Process {} stopping", self.id);
         self.stop_flag.store(true, Ordering::Relaxed);
     }
 
@@ -225,17 +205,6 @@ impl Process {
                     }
                 }
             }
-
-            match message {
-                Message::Broadcast(broadcast) => {
-                    info!("Process {} SENDING BROADCAST with hash {}: step={:?}, rank={}, value={}, previous_step_responses={:?}", 
-                        broadcast.sender, broadcast.hash_value(), broadcast.step, broadcast.rank, broadcast.value, broadcast.previous_step_responses);
-                }
-                Message::Response(response) => {
-                    info!("Process {} SENDING RESPONSE with broadcast hash {}: step={:?}, rank={}, state={:?}", 
-                        response.sender, response.state[0].broadcast.hash_value(), response.step, response.rank, response.state);
-                }
-            }
             
             for sender in senders {
                 sender.send(message.clone()).unwrap();
@@ -246,9 +215,9 @@ impl Process {
     pub fn propose(&mut self, threshold: usize, value: i64, rank: Rank) -> i64 {
         loop {
             if self.stop_flag.load(Ordering::Relaxed) {
-                info!("Process {} received stop signal, terminating", self.id);
                 return -1;
             }
+
             // R Step
             let r_value = self.r_step(threshold, RValue::new(rank, value));
 
@@ -263,8 +232,6 @@ impl Process {
                 Decision::Commit(val) => return val,
                 Decision::Adopt(val) => self.propose(threshold, val, rank + 1)
             };
-
-            //return (flag, a_value);
         }
     }
 
@@ -272,17 +239,11 @@ impl Process {
     fn r_step(&mut self, threshold: usize, r_value: RValue) -> RValue {
         let rank = r_value.rank;
         let value = r_value.value;
-        
-        info!("Process {} starting R-step with rank {} and value {}", 
-              self.id, rank, value);
 
         // Line 16: compile certificate C (empty at rank 0) 
         // Line 90: To compile a broadcast certificate, list all 2f + 1 answers to the previous step broadcast received during the previous step.
         // Line 17: broadcast(R, i, v, C) 
         if rank > 0 {
-            info!("Process {} waiting for {} B responses from rank {}", 
-                  self.id, threshold, rank - 1);
-
             let key = (Step::B, rank - 1);
 
             loop {
@@ -317,10 +278,7 @@ impl Process {
                     .cloned()
                     .collect::<Vec<Response>>();
 
-                let max_value = Self::find_max_r_value(&response_vec);
-                
-                info!("Process {} collected max R value {} in rank {}", 
-                    self.id, max_value.value, rank);
+                let max_value = Self::process_r_responses(&response_vec);
                 
                 // Return the maximum of all R values
                 return max_value;
@@ -328,7 +286,7 @@ impl Process {
         }
     }
 
-    fn find_max_r_value(responses: &Vec<Response>) -> RValue {
+    fn process_r_responses(responses: &Vec<Response>) -> RValue {
         let r_values: Vec<RValue> = responses
             .iter()
             .filter_map(|response| {
@@ -387,9 +345,6 @@ impl Process {
     fn a_step(&mut self, threshold: usize, r_value: RValue) -> (bool, i64) {
         let value = r_value.value;
         let rank = r_value.rank;
-        
-        info!("Process {} starting A-step with rank {} and value {}", 
-              self.id, rank, value);
 
         let key = (Step::R, rank);
 
@@ -401,12 +356,9 @@ impl Process {
         // Line 33: broadcast(A, i, v, C)
         Process::send_message(&self.senders, &mut Message::Broadcast(broadcast), self.byzantine);
         
-        info!("Process {} waiting for {} A responses", self.id, threshold);
-
-        // Lines 34/35:  wait until receive valid (Aresp, i, A[i]) 35: from 2f + 1 processes
-
         let key = (Step::A, rank);
 
+        // Lines 34/35:  wait until receive valid (Aresp, i, A[i]) 35: from 2f + 1 processes
         loop {
             let responses = self.responses.read().unwrap();
             if responses.get(&key).map(|m| m.len()).unwrap_or(0) == threshold {
@@ -537,9 +489,6 @@ impl Process {
     }
 
     fn b_step(&mut self, threshold: usize, rank: Rank, flag: bool, value: i64) -> Decision {
-        info!("Process {} starting B-step with rank {}, value {}, flag={}", 
-              self.id, rank, value, flag);
-
         // Line 51: compile certificate C
         let key = (Step::A, rank);
                 
@@ -551,8 +500,6 @@ impl Process {
         Process::send_message(&self.senders, &mut Message::Broadcast(broadcast), self.byzantine);
         
         let key = (Step::B, rank);
-
-        info!("Process {} waiting for {} B responses", self.id, threshold);
 
         // Line 53/54:  wait until receive valid (Bresp, i, B[i]) from 2f + 1 proc.
         loop {
@@ -781,24 +728,18 @@ impl Process {
                 Step::R => {
                     // For R step at rank r, must have B step at rank r-1
                     if broadcast.step != Step::R || broadcast.rank != response.rank {
-                        info!("Invalid R response: expected R step at rank {}, got {:?} at rank {}", 
-                              response.rank, broadcast.step, broadcast.rank);
                         return false;
                     }
                 }
                 Step::A => {
                     // For A step at rank r, must have R step at rank r
                     if broadcast.step != Step::A || broadcast.rank != response.rank {
-                        info!("Invalid A response: expected A step at rank {}, got {:?} at rank {}", 
-                              response.rank, broadcast.step, broadcast.rank);
                         return false;
                     }
                 }
                 Step::B => {
                     // For B step at rank r, must have A step at rank r
                     if broadcast.step != Step::B || broadcast.rank != response.rank {
-                        info!("Invalid B response: expected B step at rank {}, got {:?} at rank {}", 
-                              response.rank, broadcast.step, broadcast.rank);
                         return false;
                     }
                 }
@@ -808,22 +749,15 @@ impl Process {
     }
 
     fn reliably_check_response(
-        id: Id,
         response: Response,
-        broadcasts: &mut Broadcasts,
         responses: &Responses,
         pending_responses: &mut PendingResponses,
         threshold: usize
     ) {
         // Validate the response before processing
         if !Process::validate_response(&response) {
-            info!("Invalid response received from process {} at step {:?} and rank {}", 
-                  response.sender, response.step, response.rank);
             return;
         }
-
-        info!("Process {} handling response from {}: step={:?}, rank={}", 
-              id, response.sender, response.step, response.rank);
               
         // Extract broadcast hashes from response states
         let broadcast_hashes: BTreeSet<BroadcastHash> = response.state.iter()
@@ -832,24 +766,16 @@ impl Process {
 
         // Add to pending responses
         if !pending_responses.contains_key(&broadcast_hashes) {
-            info!("Process {}: Creating new pending response entry", id);
             let mut responses_set = HashSet::new();
             responses_set.insert(response.clone());
             pending_responses.insert(broadcast_hashes.clone(), responses_set);
         } else {
-            info!("Process {}: Adding to existing pending responses", id);
             pending_responses.get_mut(&broadcast_hashes).unwrap().insert(response.clone());
         }
 
         // Check if we've reached the threshold
-        if let Some(received_responses) = pending_responses.get(&broadcast_hashes) {
-            info!("Process {}: Current pending responses count: {}/{}", 
-                id, received_responses.len(), threshold);
-                
-            if received_responses.len() >= threshold {
-                info!("Process {}: Threshold reached for responses ({}), storing in responses map", 
-                    id, threshold);
-                    
+        if let Some(received_responses) = pending_responses.get(&broadcast_hashes) {                
+            if received_responses.len() >= threshold {                    
                 // Store each response in the responses map
                 for resp in received_responses {
                     let key = (resp.step.clone(), resp.rank);
@@ -869,7 +795,6 @@ impl Process {
         broadcast: &Broadcast,
         broadcasts: &Broadcasts,
         f: usize,
-        r_set: &R,
     ) -> bool {
         if broadcast.step == Step::R && broadcast.rank == 0 {
             return true;
@@ -906,7 +831,7 @@ impl Process {
                 }
             }
             Step::A => {
-                Process::find_max_r_value(&responses).value == broadcast.value
+                Process::process_r_responses(&responses).value == broadcast.value
             }
             Step::B => {
                 if broadcast.flag.is_none() {
@@ -973,14 +898,13 @@ mod tests {
                 process3.propose(threshold, instance + 2, 0)
             });
 
-            let p4 = thread::spawn(move || {
+            thread::spawn(move || {
                 process4.propose(threshold, instance + 3, 0)
             });
             
             let p1_value = p1.join().unwrap();
             let p2_value = p2.join().unwrap();
             let p3_value = p3.join().unwrap();
-            let p4_value = p4.join().unwrap();
 
             process1_clone.stop();
             process2_clone.stop();
@@ -989,14 +913,6 @@ mod tests {
 
             assert_eq!(p1_value, p2_value);
             assert_eq!(p1_value, p3_value);
-
-            /*if p1_value.0 && p2_value.0 {
-                assert_eq!(p1_value.1, p2_value.1);
-            }
-
-            if p1_value.0 && p3_value.0 {
-                assert_eq!(p1_value.1, p3_value.1);
-            }*/
         }
     }
 }
