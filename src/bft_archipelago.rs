@@ -94,7 +94,6 @@ impl Process {
         let mut pending_responses: PendingResponses = HashMap::new();
 
         loop {
-            // Check if we should stop
             if stop_flag.load(Ordering::Relaxed) {
                 break;
             }
@@ -108,7 +107,6 @@ impl Process {
                         if is_reliable {
                             broadcasts.entry(broadcast.clone()).or_insert(0);
 
-                            // Process the reliable broadcast
                             match broadcast.step {
                                 Step::R => {
                                     Process::answer_r_broadcast(
@@ -165,7 +163,6 @@ impl Process {
                 let mut rng = rand::thread_rng();
                 match message {
                     Message::Broadcast(broadcast) => {
-                        // Randomly choose which field to change
                         match rng.gen_range(2..3) {
                             0 => broadcast.step = match broadcast.step {
                                 Step::R => Step::A,
@@ -179,7 +176,6 @@ impl Process {
                         }
                     }
                     Message::Response(response) => {
-                        // Randomly choose which field to change
                         match rng.gen_range(0..1) {
                             0 => response.step = match response.step {
                                 Step::R => Step::A,
@@ -188,7 +184,6 @@ impl Process {
                             },
                             //1 => response.rank = rng.gen_range(0..100),
                             2 => {
-                                // Randomly change one of the states
                                 if !response.state.is_empty() {
                                     let idx = rng.gen_range(0..response.state.len());
                                     response.state[idx].value = Value::RValue(RValue::new(rng.gen_range(0..100), rng.gen_range(0..100)));
@@ -212,16 +207,12 @@ impl Process {
                 return -1;
             }
 
-            // R Step
             let r_value = self.r_step(threshold, RValue::new(rank, value));
 
-            // A Step
             let (flag, a_value) = self.a_step(threshold, r_value);
 
-            // B Step
             let decision = self.b_step(threshold, r_value.rank, flag, a_value);
             
-            // Return decision result
             match decision {
                 Decision::Commit(val) => return val,
                 Decision::Adopt(val) => self.propose(threshold, val, rank + 1)
@@ -259,13 +250,12 @@ impl Process {
             Process::send_message(&self.senders, &mut Message::Broadcast(broadcast), self.byzantine);
         }
 
-        // Line 18/19: wait until (receive valid (Rresp, i, R, C) from 2f + 1 processes)
         let key = (Step::R, rank);
 
+        // Line 18/19: wait until (receive valid (Rresp, i, R, C) from 2f + 1 processes)
         loop {
             let responses = self.responses.read().unwrap();
             if responses.get(&key).map(|m| m.len()).unwrap_or(0) == threshold {
-                // Collect the R values from the responses
                 let response_vec = responses.get(&key)
                     .unwrap()
                     .values()
@@ -274,7 +264,6 @@ impl Process {
 
                 let max_value = Self::process_r_responses(&response_vec);
                 
-                // Return the maximum of all R values
                 return max_value;
             }
         }
@@ -323,7 +312,7 @@ impl Process {
                 .unwrap()
         };
 
-        // A broadcast from pi justifies a response from pj for an R-Step if it contains the highest value encountered that appears in pj response.
+        // Page 9: A broadcast from pi justifies a response from pj for an R-Step if it contains the highest value encountered that appears in pj response.
         let response = Response::new(
             id,
             Step::R,
@@ -356,7 +345,6 @@ impl Process {
         loop {
             let responses = self.responses.read().unwrap();
             if responses.get(&key).map(|m| m.len()).unwrap_or(0) == threshold {
-                // Get responses as a Vec
                 let response_vec = responses.get(&key)
                     .unwrap()
                     .values()
@@ -369,7 +357,6 @@ impl Process {
     }
 
     fn process_a_responses(responses: &[Response], threshold: usize) -> (bool, i64) {
-        // Collect the A values from the responses
         let a_values: Vec<AValue> = responses
             .iter()
             .filter_map(|response| {
@@ -382,14 +369,11 @@ impl Process {
             })
             .collect();
         
-        // Count occurrences of each value in the A-answers
         let mut value_counts: HashMap<AValue, usize> = HashMap::new();
         let mut max_value = a_values.first().map_or(AValue(0), |v| *v);
 
         for a_value in &a_values {
-            *value_counts.entry(*a_value).or_insert(0) += 1;
-            
-            // Track the maximum value
+            *value_counts.entry(*a_value).or_insert(0) += 1;            
             if a_value.0 > max_value.0 {
                 max_value = *a_value;
             }
@@ -418,7 +402,6 @@ impl Process {
         let j = broadcast.rank as usize;
         let broadcast_value = AValue(broadcast.value);
         
-        // First, check if we need to update a_sets
         {
             let mut a_sets_write = a_sets.write().unwrap();
             if a_sets_write.len() > j {
@@ -440,15 +423,13 @@ impl Process {
             }
         }
 
-        // Now handle sending responses
         let mut sent_values = HashSet::new();
         
-        // Get the current a_sets state for sending responses
         let current_a_sets = {
             a_sets.read().unwrap().clone().clone()
         };
 
-        /* A broadcast from pi justifies a response from pj for an A-Step, if it contains 
+        /* Page 9: A broadcast from pi justifies a response from pj for an A-Step, if it contains 
         the highest value v and, if possible, 
         any value from the response different from v. */
 
@@ -511,7 +492,6 @@ impl Process {
     }
 
     fn process_b_responses(responses: &[Response], threshold: usize) -> Decision {
-        // Collect the B values from the responses
         let b_values: Vec<BValue> = responses
             .iter()
             .filter_map(|response| {
@@ -524,7 +504,6 @@ impl Process {
             })
             .collect();
 
-        // Count how many true values exist
         let true_values: Vec<&BValue> = b_values.iter()
             .filter(|&b_value| b_value.flag)
             .collect();
@@ -607,7 +586,7 @@ impl Process {
             }
         }
 
-        /* For a broadcast from pi to justify a response from pj for a B-Step, it must ensures the following: 
+        /* Page 9: For a broadcast from pi to justify a response from pj for a B-Step, it must ensures the following: 
         if the response contains only true, then the broadcast should contain true; 
         if the response contains at least one true and false pair, then the broadcast should contain the true pair, and any of the false pairs; 
         if the response contains only false pairs, then the broadcast should contain the pair among them with the highest value. */
@@ -620,7 +599,6 @@ impl Process {
             .filter(|b_state| !b_state.flag)
             .collect();
         
-        // Case 1: Only true pairs
         if !true_pairs.is_empty() && false_pairs.is_empty() {
             let b_value = *true_pairs[0];
 
@@ -631,7 +609,6 @@ impl Process {
                 .0
                 .clone();
 
-            // Send one response with one of the true pairs
             let response = Response::new(
                 id, 
                 Step::B,
@@ -641,7 +618,6 @@ impl Process {
 
             Process::send_message(senders, &mut Message::Response(response), byzantine);
         }
-        // Case 2: At least one true and one false pair
         else if !true_pairs.is_empty() && !false_pairs.is_empty() {
             let mut b_state = Vec::new();
 
@@ -678,9 +654,7 @@ impl Process {
 
             Process::send_message(senders, &mut Message::Response(response), byzantine);
         }
-        // Case 3: Only false pairs
         else if true_pairs.is_empty() && !false_pairs.is_empty() {                                        
-            // Send response with the false pair having the highest value
             let highest_false = false_pairs.iter()
                 .max_by_key(|b_state| b_state.value)
                 .unwrap();
@@ -709,19 +683,16 @@ impl Process {
             
             match response.step {
                 Step::R => {
-                    // For R step at rank r, must have B step at rank r-1
                     if broadcast.step != Step::R || broadcast.rank != response.rank {
                         return false;
                     }
                 }
                 Step::A => {
-                    // For A step at rank r, must have R step at rank r
                     if broadcast.step != Step::A || broadcast.rank != response.rank {
                         return false;
                     }
                 }
                 Step::B => {
-                    // For B step at rank r, must have A step at rank r
                     if broadcast.step != Step::B || broadcast.rank != response.rank {
                         return false;
                     }
@@ -731,23 +702,21 @@ impl Process {
         true
     }
 
+    // Line 91: To reliably check response (check if a response is valid), check if, for the broadcast(s) originating its value we have received 2f + 1 responses to that broadcast
     fn reliably_check_response(
         response: Response,
         responses: &Responses,
         pending_responses: &mut PendingResponses,
         threshold: usize
     ) {
-        // Validate the response before processing
         if !Process::validate_response(&response) {
             return;
         }
               
-        // Extract broadcast hashes from response states
         let broadcast_hashes: BTreeSet<BroadcastHash> = response.state.iter()
             .map(|r| r.broadcast.hash_value())
             .collect();
 
-        // Add to pending responses
         if !pending_responses.contains_key(&broadcast_hashes) {
             let mut responses_set = HashSet::new();
             responses_set.insert(response);
@@ -756,16 +725,13 @@ impl Process {
             pending_responses.get_mut(&broadcast_hashes).unwrap().insert(response);
         }
 
-        // Check if we've reached the threshold
         if let Some(received_responses) = pending_responses.get(&broadcast_hashes) {                
             if received_responses.len() >= threshold {                    
-                // Store each response in the responses map
                 for resp in received_responses {
                     let key = (resp.step, resp.rank);
                     let mut responses_map = responses.write().unwrap();
                     let entry = responses_map.entry(key).or_default();
                     
-                    // Only add if we don't have a response from this sender yet and we're below threshold
                     if !entry.contains_key(&resp.sender) && entry.len() < threshold {
                         entry.insert(resp.sender, resp.clone());
                     }
@@ -791,7 +757,8 @@ impl Process {
         let responses = broadcast.previous_step_responses.clone().unwrap();
 
         // Line 74/75: if |{bcast-answers ∈ C}| > f then return true
-        // There are at least f responses in the certificate that have been reliably verified
+        // If at least f+1 responses contain this broadcast, it means that at least one of those response comes from a correct process, 
+        // which reliably checked the broadcast, so we don't have to check itå
         if *broadcasts.get(broadcast).unwrap_or(&0) as usize > f {
             return true;
         }
