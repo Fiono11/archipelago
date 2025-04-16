@@ -51,9 +51,6 @@ impl Process {
         let responses = Arc::new(RwLock::new(HashMap::new()));
         let responses_clone = responses.clone();
         let senders_clone = senders.clone();
-        let r_set = Arc::new(RwLock::new(RValue::default()));
-        let a_sets = Arc::new(RwLock::new(Vec::new()));
-        let b_sets = Arc::new(RwLock::new(Vec::new()));
         let stop_flag = Arc::new(AtomicBool::new(false));
         let stop_flag_clone = Arc::clone(&stop_flag);
 
@@ -72,9 +69,6 @@ impl Process {
                 f,
                 responses_clone,
                 senders_clone,
-                r_set,
-                a_sets,
-                b_sets,
                 stop_flag_clone,
                 receiver,
                 byzantine
@@ -89,13 +83,13 @@ impl Process {
         f: usize,
         responses: Responses,
         senders: Vec<Sender<Message>>,
-        r_set: R,
-        a_sets: A,
-        b_sets: B,
         stop_flag: Arc<AtomicBool>,
         receiver: Receiver<Message>,
         byzantine: bool
     ) {
+        let r_set = Arc::new(RwLock::new(RValue::default()));
+        let a_sets = Arc::new(RwLock::new(Vec::new()));
+        let b_sets = Arc::new(RwLock::new(Vec::new()));
         let mut broadcasts: Broadcasts = HashMap::new();
         let mut pending_responses: PendingResponses = HashMap::new();
 
@@ -286,7 +280,7 @@ impl Process {
         }
     }
 
-    fn process_r_responses(responses: &Vec<Response>) -> RValue {
+    fn process_r_responses(responses: &[Response]) -> RValue {
         let r_values: Vec<RValue> = responses
             .iter()
             .filter_map(|response| {
@@ -374,7 +368,7 @@ impl Process {
         }
     }
 
-    fn process_a_responses(responses: &Vec<Response>, threshold: usize) -> (bool, i64) {
+    fn process_a_responses(responses: &[Response], threshold: usize) -> (bool, i64) {
         // Collect the A values from the responses
         let a_values: Vec<AValue> = responses
             .iter()
@@ -517,7 +511,7 @@ impl Process {
         } 
     }
 
-    fn process_b_responses(responses: &Vec<Response>, threshold: usize) -> Decision {
+    fn process_b_responses(responses: &[Response], threshold: usize) -> Decision {
         // Collect the B values from the responses
         let b_values: Vec<BValue> = responses
             .iter()
@@ -541,14 +535,14 @@ impl Process {
             let value = true_values.first().unwrap().value;
 
             // Line 57: return ⟨commit, val⟩
-            return Decision::Commit(value)
+            Decision::Commit(value)
         }
         // Line 58: else if |{⟨true, val⟩ ∈ S}| ≥ 1 then
         else if !true_values.is_empty() {
             let value = true_values.first().unwrap().value;
             
             // Line 59: return ⟨adopt, val⟩
-            return Decision::Adopt(value);
+            Decision::Adopt(value)
         }
         else {
             let max_value = b_values.iter()
@@ -557,7 +551,7 @@ impl Process {
                 .unwrap();
 
             // Line 60: else return ⟨adopt, max(S)⟩
-            return Decision::Adopt(max_value);
+            Decision::Adopt(max_value)
         }
     }
 
@@ -778,9 +772,9 @@ impl Process {
             if received_responses.len() >= threshold {                    
                 // Store each response in the responses map
                 for resp in received_responses {
-                    let key = (resp.step.clone(), resp.rank);
+                    let key = (resp.step, resp.rank);
                     let mut responses_map = responses.write().unwrap();
-                    let entry = responses_map.entry(key).or_insert_with(HashMap::new);
+                    let entry = responses_map.entry(key).or_default();
                     
                     // Only add if we don't have a response from this sender yet and we're below threshold
                     if !entry.contains_key(&resp.sender) && entry.len() < threshold {
@@ -809,7 +803,7 @@ impl Process {
 
         // Line 74/75: if |{bcast-answers ∈ C}| > f then return true
         // There are at least f responses in the certificate that have been reliably verified
-        if *broadcasts.get(&broadcast).unwrap_or(&0) as usize > f {
+        if *broadcasts.get(broadcast).unwrap_or(&0) as usize > f {
             return true;
         }
 
@@ -835,7 +829,7 @@ impl Process {
             }
             Step::B => {
                 if broadcast.flag.is_none() {
-                    return false;
+                    false
                 }
                 else {
                     Process::process_a_responses(&responses, threshold) == (broadcast.flag.unwrap(), broadcast.value)
