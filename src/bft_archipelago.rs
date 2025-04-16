@@ -264,12 +264,14 @@ impl Process {
 
                 let max_value = Self::process_r_responses(&response_vec);
                 
+                // Line 22: R ← max(R)
                 return max_value;
             }
         }
     }
 
     fn process_r_responses(responses: &[Response]) -> RValue {
+        // Line 20: R ← union of all valid Rs received in previous line
         let r_values: Vec<RValue> = responses
             .iter()
             .filter_map(|response| {
@@ -282,6 +284,7 @@ impl Process {
             })
             .collect();
 
+        // Line 21: ⟨i’,v’⟩ ← max(R)
         *r_values.iter().max().unwrap()
     }
 
@@ -357,6 +360,7 @@ impl Process {
     }
 
     fn process_a_responses(responses: &[Response], threshold: usize) -> (bool, i64) {
+        // Line 36: S ← union of all A[i]s received
         let a_values: Vec<AValue> = responses
             .iter()
             .filter_map(|response| {
@@ -387,7 +391,7 @@ impl Process {
             }
         }
 
-        // Line 40:  else return ⟨false, max(S)⟩
+        // Line 40: else return ⟨false, max(S)⟩
         (false, max_value.0)
     }
 
@@ -479,7 +483,6 @@ impl Process {
         loop {
             let responses = self.responses.read().unwrap();
             if responses.get(&key).map(|m| m.len()).unwrap_or(0) == threshold {
-                // Get responses as a Vec
                 let response_vec = responses.get(&key)
                     .unwrap()
                     .values()
@@ -492,6 +495,7 @@ impl Process {
     }
 
     fn process_b_responses(responses: &[Response], threshold: usize) -> Decision {
+        // Line 55: S ← array with all B[i]s received
         let b_values: Vec<BValue> = responses
             .iter()
             .filter_map(|response| {
@@ -554,6 +558,7 @@ impl Process {
         if len > j {
             let len = b_values.len();
 
+            // Line 63: m ← max(B[j][0].v, B[j][1].v)
             let m = match len {
                 0 => 0,
                 1 => b_values[0].value,
@@ -571,9 +576,9 @@ impl Process {
                     b_values.iter().any(|value| value == &b_value)
                 };
                 
-                // Line 65: else if(flag ∧ ⟨flag, v⟩ ∈/ B[j] ∨ ¬flag ∧ v > m) then
+                // Lines 65/66: else if(flag ∧ ⟨flag, v⟩ ∈/ B[j] ∨ ¬flag ∧ v > m) then
                 if (flag && !contains_flag_value) || (!flag && value > m) {
-                    // Line 66: B[j][0] ← ⟨flag, v⟩
+                    // Line 67: B[j][0] ← ⟨flag, v⟩
                     {
                         b_values[0] = b_value;
                     }
@@ -756,7 +761,7 @@ impl Process {
         let threshold = 2 * f + 1;
         let responses = broadcast.previous_step_responses.clone().unwrap();
 
-        // Line 74/75: if |{bcast-answers ∈ C}| > f then return true
+        // Lines 74/75: if |{bcast-answers ∈ C}| > f then return true
         // If at least f+1 responses contain this broadcast, it means that at least one of those response comes from a correct process, 
         // which reliably checked the broadcast, so we don't have to check itå
         if *broadcasts.get(broadcast).unwrap_or(&0) as usize > f {
@@ -773,6 +778,7 @@ impl Process {
         // Line 78: check if |{bcast-answers }| > f
 
         match broadcast.step {
+            // Lines 79/80/81: If X = R then check (i, v) is correct according to signed B-answers received and step B
             Step::R => {
                 if broadcast.rank == 0 {
                     true
@@ -780,9 +786,11 @@ impl Process {
                     Process::process_b_responses(&responses, threshold) == Decision::Adopt(broadcast.value)
                 }
             }
+            // Lines 82/83/84: else if X=A then	check (i, v) is correct according to signed R-answers received and step R
             Step::A => {
                 Process::process_r_responses(&responses).value == broadcast.value
             }
+            // Lines 85/86/87: else if X= B then check (i, bool, v) is correct according to signed A-answers received and step A
             Step::B => {
                 if broadcast.flag.is_none() {
                     false
