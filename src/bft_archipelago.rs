@@ -192,7 +192,7 @@ impl Process {
                 match message {
                     Message::Broadcast(broadcast) => {
                         // Randomly choose which field to change
-                        match rng.gen_range(0..3) {
+                        match rng.gen_range(2..3) {
                             0 => broadcast.step = match broadcast.step {
                                 Step::R => Step::A,
                                 Step::A => Step::B,
@@ -215,13 +215,10 @@ impl Process {
                             //1 => response.rank = rng.gen_range(0..100),
                             2 => {
                                 // Randomly change one of the states
-                                /*if !response.state.is_empty() {
+                                if !response.state.is_empty() {
                                     let idx = rng.gen_range(0..response.state.len());
-                                    response.state[idx] = State::new(
-                                        Value::RValue(RValue::new(rng.gen_range(0..100), rng.gen_range(0..100))),
-                                        response.broadcast_request.clone()
-                                    );
-                                }*/
+                                    response.state[idx].value = Value::RValue(RValue::new(rng.gen_range(0..100), rng.gen_range(0..100)));
+                                }
                             },
                             _ => unreachable!(),
                         }
@@ -776,7 +773,7 @@ impl Process {
         }
     }
 
-    /*fn validate_response(response: &Response) -> bool {
+    fn validate_response(response: &Response) -> bool {
         for state in &response.state {
             let broadcast = &state.broadcast;
             
@@ -808,7 +805,7 @@ impl Process {
             }
         }
         true
-    }*/
+    }
 
     fn reliably_check_response(
         id: Id,
@@ -818,6 +815,13 @@ impl Process {
         pending_responses: &mut PendingResponses,
         threshold: usize
     ) {
+        // Validate the response before processing
+        if !Process::validate_response(&response) {
+            info!("Invalid response received from process {} at step {:?} and rank {}", 
+                  response.sender, response.step, response.rank);
+            return;
+        }
+
         info!("Process {} handling response from {}: step={:?}, rank={}", 
               id, response.sender, response.step, response.rank);
               
@@ -954,7 +958,7 @@ mod tests {
             let mut process3 = Process::new(2, f, vec![sender1.clone(), sender2.clone(), sender3.clone(), sender4.clone()], receiver3, false);
             let mut process3_clone = process3.clone();
             
-            let mut process4 = Process::new(3, f, vec![sender1.clone(), sender2.clone(), sender3.clone(), sender4.clone()], receiver4, false);
+            let mut process4 = Process::new(3, f, vec![sender1.clone(), sender2.clone(), sender3.clone(), sender4.clone()], receiver4, true);
             let mut process4_clone = process4.clone();
 
             let p1 = thread::spawn(move || {
