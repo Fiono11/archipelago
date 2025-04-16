@@ -475,7 +475,6 @@ impl Process {
             Step::A,
             broadcast.rank,
             a_states,
-            //broadcast.clone()
         );
         
         // Line 48: send(Aresp, j, A[j], sig, b) to all
@@ -571,9 +570,9 @@ impl Process {
         let value = broadcast.value;
         let flag = broadcast.flag.unwrap();
         let b_value = BValue::new(value, flag);
+        let mut b_values = b_sets.write().unwrap();
         
         if len > j {
-            let b_values = b_sets.read().unwrap().clone();
             let len = b_values.len();
 
             let m = match len {
@@ -585,26 +584,26 @@ impl Process {
             if len < 2 {
                 {
                     // Line 64: if |B[j]| < 2 then add ⟨bool, v⟩ to B[j]
-                    b_sets.write().unwrap().push(b_value);
+                    b_values.push(b_value);
                 }
             }
             else {
                 let contains_flag_value = {
-                    b_sets.read().unwrap().iter().any(|value| value == &b_value)
+                    b_values.iter().any(|value| value == &b_value)
                 };
                 
                 // Line 65: else if(flag ∧ ⟨flag, v⟩ ∈/ B[j] ∨ ¬flag ∧ v > m) then
                 if (flag && !contains_flag_value) || (!flag && value > m) {
                     // Line 66: B[j][0] ← ⟨flag, v⟩
                     {
-                        b_sets.write().unwrap()[0] = b_value;
+                        b_values[0] = b_value;
                     }
                 }
             }
         }
         else {
             {
-                b_sets.write().unwrap().push(b_value);
+                b_values.push(b_value);
             }
         }
 
@@ -612,13 +611,6 @@ impl Process {
         if the response contains only true, then the broadcast should contain true; 
         if the response contains at least one true and false pair, then the broadcast should contain the true pair, and any of the false pairs; 
         if the response contains only false pairs, then the broadcast should contain the pair among them with the highest value. */
-        
-        // Get true and false pairs
-        let b_values = {
-            b_sets.read().unwrap().clone()
-        };
-
-        assert!(!b_values.is_empty());
         
         let true_pairs: Vec<&BValue> = b_values.iter()
             .filter(|b_state| b_state.flag)
@@ -645,7 +637,6 @@ impl Process {
                 Step::B,
                 broadcast.rank, 
                 vec![State::new(Value::BValue(b_value), response_broadcast)], 
-                //broadcast.clone()
             );
 
             Process::send_message(senders, &mut Message::Response(response), byzantine);
@@ -683,7 +674,6 @@ impl Process {
                 Step::B,
                 broadcast.rank, 
                 b_state, 
-                //broadcast.clone()
             );
 
             Process::send_message(senders, &mut Message::Response(response), byzantine);
@@ -707,7 +697,6 @@ impl Process {
                 Step::B,
                 broadcast.rank, 
                 vec![State::new(Value::BValue(**highest_false), response_broadcast)], 
-                //broadcast.clone()
             );
 
             Process::send_message(senders, &mut Message::Response(response), byzantine);
@@ -761,10 +750,10 @@ impl Process {
         // Add to pending responses
         if !pending_responses.contains_key(&broadcast_hashes) {
             let mut responses_set = HashSet::new();
-            responses_set.insert(response.clone());
+            responses_set.insert(response);
             pending_responses.insert(broadcast_hashes.clone(), responses_set);
         } else {
-            pending_responses.get_mut(&broadcast_hashes).unwrap().insert(response.clone());
+            pending_responses.get_mut(&broadcast_hashes).unwrap().insert(response);
         }
 
         // Check if we've reached the threshold
