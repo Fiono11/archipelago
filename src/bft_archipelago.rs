@@ -314,43 +314,37 @@ impl Process {
             let responses = self.responses.read().unwrap();
             if responses.get(&key).map(|m| m.len()).unwrap_or(0) == threshold {
                 // Collect the R values from the responses
-                let r_values: Vec<RValue> = responses.get(&key)
+                let response_vec = responses.get(&key)
                     .unwrap()
                     .values()
-                    .filter_map(|response| {
-                        for state in &response.state {
-                            if let Value::RValue(r_value) = state.value {
-                                return Some(r_value);
-                            }
-                        }
-                        None
-                    })
-                    .collect();
+                    .cloned()
+                    .collect::<Vec<Response>>();
+
+                let max_value = Self::find_max_r_value(&response_vec);
                 
-                info!("Process {} collected {} R values in rank {}", 
-                      self.id, r_values.len(), rank);
+                info!("Process {} collected max R value {} in rank {}", 
+                    self.id, max_value.value, rank);
                 
                 // Return the maximum of all R values
-                return *r_values.iter().max().unwrap();
+                return max_value;
             }
         }
     }
 
-    fn r_max(r_values: Vec<RValue>, r_set: &R) -> RValue {
-        // Line 20: R ← R ∪ {union of all valid Rs received in previous line}
-        let mut combined_values = r_values;
-        combined_values.push(r_set.read().unwrap().clone());
+    fn find_max_r_value(responses: &Vec<Response>) -> RValue {
+        let r_values: Vec<RValue> = responses
+            .iter()
+            .filter_map(|response| {
+                for state in &response.state {
+                    if let Value::RValue(r_value) = state.value {
+                        return Some(r_value);
+                    }
+                }
+                None
+            })
+            .collect();
 
-        // Line 22: ⟨i′,v′⟩ ← max(R) 
-        let max_r_value = combined_values.iter().max().unwrap();
-
-        // Line 23: R ← max(R) 
-        {
-            *r_set.write().unwrap() = *max_r_value;
-        }
-
-        // Line 24: return ⟨i′,v′⟩
-        *max_r_value
+        *r_values.iter().max().unwrap()
     }
 
     // Line 25: Upon delivering (R, j, v, C) from p
@@ -973,7 +967,7 @@ impl Process {
         }
 
         let threshold = 2 * f + 1;
-        let responses = broadcast.previous_step_responses.clone();
+        let responses = broadcast.previous_step_responses.clone().unwrap();
 
         // Line 74/75: if |{bcast-answers ∈ C}| > f then return true
         // There are at least f responses in the certificate that have been reliably verified
@@ -982,9 +976,9 @@ impl Process {
         }
 
         // Line 76: check that |C| ≥ 2f + 1 messages 
-        //if count < threshold {
-            //return false;
-        //}
+        if responses.len() < threshold {
+            return false;
+        }
         
         // Missing
         // Line 77: check signatures of those messages 
@@ -1000,7 +994,7 @@ impl Process {
                 }
             }
             Step::A => {
-                true
+                Process::find_max_r_value(&responses).value == broadcast.value
             }
             Step::B => {
                 if broadcast.flag.is_none() {
