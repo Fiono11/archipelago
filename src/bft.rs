@@ -185,13 +185,19 @@ impl Process {
                 }
             }
             Message::Response(response) => {
-                match rng.gen_range(0..2) {
+                match rng.gen_range(0..3) {
                     0 => response.step = match response.step {
                         Step::R => Step::A,
                         Step::A => Step::B,
                         Step::B => Step::R,
                     },
                     1 => response.rank = rng.gen_range(0..100),
+                    2 => {
+                        if !response.state.is_empty() {
+                            let idx = rng.gen_range(0..response.state.len());
+                            response.state[idx].value = Value::RValue(RValue::new(rng.gen_range(0..100), rng.gen_range(0..100)));
+                        }
+                    },
                     _ => unreachable!(),
                 }
             }
@@ -268,7 +274,7 @@ impl Process {
     }
 
     fn process_r_responses(responses: &[Response]) -> RValue {
-        // Line 20: R ← union of all valid Rs received in previous line (the paper has a typo?)
+        // Line 20: R ← union of all valid Rs received in previous line
         let r_values: Vec<RValue> = responses
             .iter()
             .filter_map(|response| {
@@ -303,7 +309,7 @@ impl Process {
             *r_set.write().unwrap() = max_r_value;
         }
         
-        // Line 28: b ← bcast responsible for R’s value (the paper has a typo?)
+        // Line 28: b ← bcast responsible for R[j]’s value
         let response_broadcast = {
             broadcasts
                 .iter()
