@@ -159,46 +159,45 @@ impl Process {
     }
 
     fn send_message(senders: &[Sender<Message>], message: &mut Message, byzantine: bool) {   
-            if byzantine {
-                let mut rng = rand::thread_rng();
-                match message {
-                    Message::Broadcast(broadcast) => {
-                        match rng.gen_range(2..3) {
-                            0 => broadcast.step = match broadcast.step {
-                                Step::R => Step::A,
-                                Step::A => Step::B,
-                                Step::B => Step::R,
-                            },
-                            //1 => broadcast.value = rng.gen_range(0..100),
-                            1 => broadcast.flag = Some(rng.gen_bool(0.5)),
-                            2 => broadcast.rank = rng.gen_range(0..100),
-                            _ => unreachable!(),
-                        }
-                    }
-                    Message::Response(response) => {
-                        match rng.gen_range(0..1) {
-                            0 => response.step = match response.step {
-                                Step::R => Step::A,
-                                Step::A => Step::B,
-                                Step::B => Step::R,
-                            },
-                            //1 => response.rank = rng.gen_range(0..100),
-                            2 => {
-                                if !response.state.is_empty() {
-                                    let idx = rng.gen_range(0..response.state.len());
-                                    response.state[idx].value = Value::RValue(RValue::new(rng.gen_range(0..100), rng.gen_range(0..100)));
-                                }
-                            },
-                            _ => unreachable!(),
-                        }
-                    }
+        if byzantine {
+            Process::apply_byzantine_behavior(message);
+        }
+            
+        for sender in senders {
+            sender.send(message.clone()).unwrap_or_else(|e| {
+                eprintln!("Failed to send message: {}", e);
+            });
+        }
+    }
+
+    fn apply_byzantine_behavior(message: &mut Message) {
+        let mut rng = rand::thread_rng();
+        match message {
+            Message::Broadcast(broadcast) => {
+                match rng.gen_range(0..3) {
+                    0 => broadcast.step = match broadcast.step {
+                        Step::R => Step::A,
+                        Step::A => Step::B,
+                        Step::B => Step::R,
+                    },
+                    1 => broadcast.rank = rng.gen_range(1..3),
+                    2 => broadcast.flag = Some(rng.gen_bool(0.5)),
+                    _ => unreachable!(),
                 }
             }
-            
-            for sender in senders {
-                sender.send(message.clone()).unwrap();
-            }
        
+            Message::Response(response) => {
+                match rng.gen_range(0..2) {
+                    0 => response.step = match response.step {
+                        Step::R => Step::A,
+                        Step::A => Step::B,
+                        Step::B => Step::R,
+                    },
+                    1 => response.rank = rng.gen_range(1..3),
+                    _ => unreachable!(),
+                }
+            }
+        }
     }
 
     pub fn propose(&mut self, threshold: usize, value: i64, rank: Rank) -> i64 {
@@ -271,7 +270,7 @@ impl Process {
     }
 
     fn process_r_responses(responses: &[Response]) -> RValue {
-        // Line 20: R ← union of all valid Rs received in previous line
+        // Line 20: R ← union of all valid Rs received in previous line (the paper has a typo?)
         let r_values: Vec<RValue> = responses
             .iter()
             .filter_map(|response| {
@@ -306,7 +305,7 @@ impl Process {
             *r_set.write().unwrap() = max_r_value;
         }
         
-        // Line 28: b ← bcast responsible for R[j]’s value
+        // Line 28: b ← bcast responsible for R’s value (the paper has a typo?)
         let response_broadcast = {
             broadcasts
                 .iter()
@@ -685,6 +684,16 @@ impl Process {
     fn validate_response(response: &Response) -> bool {
         for state in &response.state {
             let broadcast = &state.broadcast;
+
+            // The broadcast's step must match the response's step
+            if broadcast.step != response.step {
+                return false;
+            }
+            
+            // The broadcast's rank must match the response's rank
+            if broadcast.rank != response.rank {
+                return false;
+            }
             
             match response.step {
                 Step::R => {
@@ -759,7 +768,7 @@ impl Process {
         }
 
         let threshold = 2 * f + 1;
-        let responses = broadcast.previous_step_responses.clone().unwrap();
+        let responses = broadcast.previous_step_responses.as_ref().unwrap();
 
         // Lines 74/75: if |{bcast-answers ∈ C}| > f then return true
         // If at least f+1 responses contain this broadcast, it means that at least one of those response comes from a correct process, 
@@ -780,15 +789,23 @@ impl Process {
         match broadcast.step {
             // Lines 79/80/81: If X = R then check (i, v) is correct according to signed B-answers received and step B
             Step::R => {
-                if broadcast.rank == 0 {
+                if broadcast.flag.is_some() {
+                    false
+                }
+                else if broadcast.rank == 0 {
                     true
                 } else {
-                    Process::process_b_responses(&responses, threshold) == Decision::Adopt(broadcast.value)
+                    Process::process_b_responses(responses, threshold) == Decision::Adopt(broadcast.value)
                 }
             }
             // Lines 82/83/84: else if X=A then	check (i, v) is correct according to signed R-answers received and step R
             Step::A => {
-                Process::process_r_responses(&responses).value == broadcast.value
+                if broadcast.flag.is_some() {
+                    false
+                }
+                else {
+                    Process::process_r_responses(responses).value == broadcast.value
+                }
             }
             // Lines 85/86/87: else if X= B then check (i, bool, v) is correct according to signed A-answers received and step A
             Step::B => {
@@ -796,7 +813,7 @@ impl Process {
                     false
                 }
                 else {
-                    Process::process_a_responses(&responses, threshold) == (broadcast.flag.unwrap(), broadcast.value)
+                    Process::process_a_responses(responses, threshold) == (broadcast.flag.unwrap(), broadcast.value)
                 }
             }
         }
