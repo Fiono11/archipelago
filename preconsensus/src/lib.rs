@@ -8,6 +8,7 @@ const FRONTIERS_THRESHOLD: usize = 1000;
 // - The length must be equal to FRONTIERS_THRESHOLD
 // - It must contain only valid final voted blocks
 // - The preproposal needs to be reliably broadcast, i.e, a preproposal needs to be echoed by at least 2f+1 nodes
+#[derive(Clone)]
 struct PreProposal {
     frontiers: Vec<BlockHash>
 }
@@ -44,7 +45,8 @@ impl Proposal {
 
     fn hash(&self) -> BlockHash {
         let mut hasher = BlockHashBuilder::new();
-        for preproposal in &self.preproposals {
+        let preproposals: BTreeSet<BlockHash> = self.preproposals.iter().cloned().collect();
+        for preproposal in &preproposals {
             hasher = hasher.update(preproposal.as_bytes());
         }
         hasher.build()
@@ -115,4 +117,20 @@ fn proposal_hash() {
     let proposal = Proposal::create_proposal(vec![preproposal]);
 
     assert_eq!(proposal.hash(), BlockHash::decode_hex("F7DB7E88D5E925085FED1B0FE3D63FC013F6A7339E1027573239A2AD767998A4").unwrap());
+}
+
+#[test]
+fn proposal_hash_with_unordered_preproposals() {
+    let preproposal1 = PreProposal {
+        frontiers: vec![BlockHash::from(1)]
+    };
+
+    let preproposal2 = PreProposal {
+        frontiers: vec![BlockHash::from(2)]
+    };
+    
+    let proposal1 = Proposal::create_proposal(vec![preproposal1.clone(), preproposal2.clone()]);
+    let proposal2 = Proposal::create_proposal(vec![preproposal2, preproposal1]);
+
+    assert_eq!(proposal1.hash(), proposal2.hash());
 }
