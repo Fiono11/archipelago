@@ -47,6 +47,16 @@ impl Proposal {
 // So if a given block only has f final votes out of 2f+1 preproposals, it means it wasn't confirmed
 
 #[test]
+fn preproposal_hash() {
+    let preproposal = PreProposal {
+        frontiers: vec![BlockHash::from(1)]
+    };
+
+    assert_eq!(preproposal.hash(), BlockHash::decode_hex("33E423980C9B37D048BD5FADBD4A2AEB95146922045405ACCC2F468D0EF96988").unwrap());
+}
+
+
+#[test]
 fn preproposal_to_proposal() {
     let preproposal = PreProposal {
         frontiers: vec![BlockHash::from(1)]
@@ -56,13 +66,4 @@ fn preproposal_to_proposal() {
     let proposal = Proposal::create_proposal(vec![preproposal]);
 
     assert_eq!(proposal.preproposals, vec![hash]);
-}
-
-#[test]
-fn preproposal_hash() {
-    let preproposal = PreProposal {
-        frontiers: vec![BlockHash::from(1)]
-    };
-
-    assert_eq!(preproposal.hash(), BlockHash::decode_hex("33E423980C9B37D048BD5FADBD4A2AEB95146922045405ACCC2F468D0EF96988").unwrap());
 }
