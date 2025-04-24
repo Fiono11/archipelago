@@ -696,17 +696,17 @@ impl Process {
             // Validate that the value in the state matches the value type expected for this step
             match response.step {
                 Step::R => {
-                    if !matches!(state.value, Value::RValue(_)) {
+                    if broadcast.step != Step::R || broadcast.rank != response.rank {
                         return false;
                     }
                 },
                 Step::A => {
-                    if !matches!(state.value, Value::AValue(_)) {
+                    if broadcast.step != Step::A || broadcast.rank != response.rank {
                         return false;
                     }
                 }
                 Step::B => {
-                    if !matches!(state.value, Value::BValue(_)) {
+                    if broadcast.step != Step::B || broadcast.rank != response.rank {
                         return false;
                     }
                 },
