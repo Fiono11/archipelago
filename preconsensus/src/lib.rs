@@ -67,3 +67,20 @@ fn preproposal_to_proposal() {
 
     assert_eq!(proposal.preproposals, vec![hash]);
 }
+
+#[test]
+fn preproposals_to_proposal() {
+    let preproposal1 = PreProposal {
+        frontiers: vec![BlockHash::from(1)]
+    };
+
+    let preproposal2 = PreProposal {
+        frontiers: vec![BlockHash::from(2)]
+    };
+    
+    let hash1 = preproposal1.hash();
+    let hash2 = preproposal2.hash();
+    let proposal = Proposal::create_proposal(vec![preproposal1, preproposal2]);
+
+    assert_eq!(proposal.preproposals, vec![hash1, hash2]);
+}
