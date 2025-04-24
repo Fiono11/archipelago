@@ -8,7 +8,6 @@ const FRONTIERS_THRESHOLD: usize = 1000;
 // - The length must be equal to FRONTIERS_THRESHOLD
 // - It must contain only valid final voted blocks
 // - The preproposal needs to be reliably broadcast, i.e, a preproposal needs to be echoed by at least 2f+1 nodes
-#[derive(Clone)]
 struct PreProposal {
     frontiers: Vec<BlockHash>
 }
@@ -35,15 +34,17 @@ struct Proposal {
     preproposals: Vec<BlockHash>
 }
 
+impl Proposal {
+    fn create_proposal(preproposals: Vec<PreProposal>) -> Proposal {
+        Proposal {
+            preproposals: preproposals.iter().map(|p| p.hash()).collect()
+        }
+    }
+}
+
 // Goal: Guarantee that every valid proposal contains all the blocks that were committed (final voted) by at least one correct node (f+1)
 // This is because a block to be confirmed needs at least 2f+1 final votes
 // So if a given block only has f final votes out of 2f+1 preproposals, it means it wasn't confirmed
-
-fn create_proposal(preproposals: Vec<PreProposal>) -> Proposal {
-    Proposal {
-        preproposals: preproposals.iter().map(|p| p.hash()).collect()
-    }
-}
 
 #[test]
 fn preproposal_to_proposal() {
@@ -52,7 +53,7 @@ fn preproposal_to_proposal() {
     };
     
     let hash = preproposal.hash();
-    let proposal = create_proposal(vec![preproposal]);
+    let proposal = Proposal::create_proposal(vec![preproposal]);
 
     assert_eq!(proposal.preproposals, vec![hash]);
 }
