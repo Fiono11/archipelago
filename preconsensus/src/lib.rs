@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use rsnano_core::{BlockHash, BlockHashBuilder};
 
 const FRONTIERS_THRESHOLD: usize = 1000;
@@ -50,6 +50,38 @@ impl Proposal {
             hasher = hasher.update(preproposal.as_bytes());
         }
         hasher.build()
+    }
+    
+    /// Returns all frontiers that are included in at least f+1 preproposals
+    /// f is the Byzantine fault tolerance parameter, typically (n-1)/3 for a system with n nodes
+    fn frontiers(&self, all_preproposals: &[PreProposal], f: usize) -> Vec<BlockHash> {
+        // Count occurrences of each frontier block across all preproposals
+        let mut frontier_counts: HashMap<BlockHash, usize> = HashMap::new();
+        
+        for preproposal in all_preproposals {
+            // Skip preproposals that are not part of this proposal
+            if !self.preproposals.contains(&preproposal.hash()) {
+                continue;
+            }
+            
+            // Count each frontier block
+            for frontier in &preproposal.frontiers {
+                *frontier_counts.entry(*frontier).or_insert(0) += 1;
+            }
+        }
+        
+        // Keep only frontiers that appear in at least f+1 preproposals
+        let threshold = f + 1;
+        let mut result: Vec<BlockHash> = frontier_counts
+            .into_iter()
+            .filter(|(_, count)| *count >= threshold)
+            .map(|(block_hash, _)| block_hash)
+            .collect();
+        
+        // Sort for deterministic output
+        result.sort();
+        
+        result
     }
 }
 
@@ -133,4 +165,44 @@ fn proposal_hash_with_unordered_preproposals() {
     let proposal2 = Proposal::create_proposal(vec![preproposal2, preproposal1]);
 
     assert_eq!(proposal1.hash(), proposal2.hash());
+}
+
+#[test]
+fn proposal_frontiers() {
+    let block1 = BlockHash::from(1);
+    let block2 = BlockHash::from(2);
+    let block3 = BlockHash::from(3);
+
+    // Node 1 has final voted block 1 and block 2
+    let preproposal1 = PreProposal {
+        frontiers: vec![BlockHash::from(1), BlockHash::from(2)]
+    };
+    
+    // Node 2 has final voted block 1 
+    let preproposal2 = PreProposal {
+        frontiers: vec![BlockHash::from(1)]
+    };
+    
+    // Node 3 has confirmed block 1 and final voted block 2
+    let preproposal3 = PreProposal {
+        frontiers: vec![BlockHash::from(1), BlockHash::from(2)]
+    };
+    
+    // Node 4 is byzantine and preproposes block 3, which is a fork of block 2
+    let preproposal4 = PreProposal {
+        frontiers: vec![BlockHash::from(3)]
+    };
+    
+    // Create a proposal that includes the preproposals from node 1, 2 and 4 
+    let preproposals = vec![
+        preproposal1.clone(), 
+        preproposal2.clone(), 
+        preproposal4.clone()
+    ];
+
+    let proposal = Proposal::create_proposal(preproposals.clone());
+    let proposal_frontiers = proposal.frontiers(&preproposals, 1);
+    
+    // The confirmed block1 needs to be included in the proposal
+    assert!(proposal_frontiers.contains(&block1));
 }
