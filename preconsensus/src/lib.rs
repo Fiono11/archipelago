@@ -1,4 +1,4 @@
-use std::hash::Hash;
+use std::{collections::BTreeSet, hash::Hash};
 
 use rsnano_core::{BlockHash, BlockHashBuilder};
 
@@ -15,7 +15,8 @@ struct PreProposal {
 impl PreProposal {
     fn hash(&self) -> BlockHash {
         let mut hasher = BlockHashBuilder::new();
-        for frontier in &self.frontiers {
+        let frontiers: BTreeSet<BlockHash> = self.frontiers.iter().cloned().collect();
+        for frontier in &frontiers {
             hasher = hasher.update(frontier.as_bytes());
         }
         hasher.build()
@@ -61,6 +62,19 @@ fn preproposal_hash() {
     };
 
     assert_eq!(preproposal.hash(), BlockHash::decode_hex("33E423980C9B37D048BD5FADBD4A2AEB95146922045405ACCC2F468D0EF96988").unwrap());
+}
+
+#[test]
+fn preproposal_hash_with_unordered_frontiers() {
+    let preproposal1 = PreProposal {
+        frontiers: vec![BlockHash::from(1), BlockHash::from(2)]
+    };
+
+    let preproposal2 = PreProposal {
+        frontiers: vec![BlockHash::from(2), BlockHash::from(1)]
+    };
+
+    assert_eq!(preproposal1.hash(), preproposal2.hash());
 }
 
 #[test]
