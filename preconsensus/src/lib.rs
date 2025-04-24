@@ -1,8 +1,8 @@
-use std::{collections::BTreeSet, hash::Hash};
-
+use std::collections::BTreeSet;
 use rsnano_core::{BlockHash, BlockHashBuilder};
 
 const FRONTIERS_THRESHOLD: usize = 1000;
+type ProposalHash = BlockHash;
 
 // For a preproposal to be valid:
 // - The length must be equal to FRONTIERS_THRESHOLD
@@ -33,7 +33,7 @@ impl PreProposal {
 struct Proposal {
     // 2f+1 valid preproposals hashes
     // The proposal must contain all the frontiers that are included in at least f+1 preproposals
-    preproposals: Vec<BlockHash>
+    preproposals: Vec<ProposalHash>
 }
 
 impl Proposal {
@@ -43,9 +43,9 @@ impl Proposal {
         }
     }
 
-    fn hash(&self) -> BlockHash {
+    fn hash(&self) -> ProposalHash {
         let mut hasher = BlockHashBuilder::new();
-        let preproposals: BTreeSet<BlockHash> = self.preproposals.iter().cloned().collect();
+        let preproposals: BTreeSet<ProposalHash> = self.preproposals.iter().cloned().collect();
         for preproposal in &preproposals {
             hasher = hasher.update(preproposal.as_bytes());
         }
