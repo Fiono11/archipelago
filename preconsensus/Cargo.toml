@@ -1,0 +1,7 @@
+[package]
+name = "preconsensus"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rsnano_core = {git = "https://github.com/rsnano-node/rsnano-node", branch="develop"}
