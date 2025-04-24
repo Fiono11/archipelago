@@ -14,7 +14,7 @@ struct PreProposal {
 
 impl PreProposal {
     fn hash(&self) -> BlockHash {
-        let mut hasher =     BlockHashBuilder::new();
+        let mut hasher = BlockHashBuilder::new();
         for frontier in &self.frontiers {
             hasher = hasher.update(frontier.as_bytes());
         }
@@ -40,6 +40,14 @@ impl Proposal {
             preproposals: preproposals.iter().map(|p| p.hash()).collect()
         }
     }
+
+    fn hash(&self) -> BlockHash {
+        let mut hasher = BlockHashBuilder::new();
+        for preproposal in &self.preproposals {
+            hasher = hasher.update(preproposal.as_bytes());
+        }
+        hasher.build()
+    }
 }
 
 // Goal: Guarantee that every valid proposal contains all the blocks that were committed (final voted) by at least one correct node (f+1)
@@ -54,7 +62,6 @@ fn preproposal_hash() {
 
     assert_eq!(preproposal.hash(), BlockHash::decode_hex("33E423980C9B37D048BD5FADBD4A2AEB95146922045405ACCC2F468D0EF96988").unwrap());
 }
-
 
 #[test]
 fn preproposal_to_proposal() {
@@ -83,4 +90,15 @@ fn preproposals_to_proposal() {
     let proposal = Proposal::create_proposal(vec![preproposal1, preproposal2]);
 
     assert_eq!(proposal.preproposals, vec![hash1, hash2]);
+}
+
+#[test]
+fn proposal_hash() {
+    let preproposal = PreProposal {
+        frontiers: vec![BlockHash::from(1)]
+    };
+    
+    let proposal = Proposal::create_proposal(vec![preproposal]);
+
+    assert_eq!(proposal.hash(), BlockHash::decode_hex("F7DB7E88D5E925085FED1B0FE3D63FC013F6A7339E1027573239A2AD767998A4").unwrap());
 }
