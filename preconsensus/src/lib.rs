@@ -7,8 +7,7 @@ type PreProposalHash = BlockHash;
 
 // For a preproposal to be valid:
 // - The length must be equal to FRONTIERS_THRESHOLD
-// - It must contain only valid final voted blocks
-// - The preproposal needs to be reliably broadcast, i.e, a preproposal needs to be echoed by at least 2f+1 nodes
+// - It must contain only valid final voted blocks, which means each block must have received at least 2f+1 votes
 #[derive(Clone)]
 struct PreProposal {
     frontiers: Vec<BlockHash>
@@ -24,18 +23,6 @@ impl PreProposal {
         hasher.build()
     }
 }
-
-// A node broadcasts a PreProposalAck with the preproposal hash if it has at least 2f+1 votes of each one of the frontiers of the preproposal
-struct PreProposalAck {
-    preproposal: PreProposalHash,
-    missing_frontiers: Option<Vec<BlockHash>>
-}
-
-// Fork of A and B
-// Node 1 preproposes A because it has final voted it
-// Node 2 preproposes A because it has final voted it
-// Node 3 
-// Node 4 (byzantine) preproposes B because it is byzantine
 
 struct Proposal {
     // 2f+1 valid preproposals hashes
@@ -204,7 +191,7 @@ fn proposal_frontiers1() {
     let preproposals = vec![
         preproposal1.clone(), 
         preproposal2.clone(), 
-        preproposal4.clone()
+        preproposal3.clone()
     ];
 
     let proposal = Proposal::create_proposal(preproposals.clone());
