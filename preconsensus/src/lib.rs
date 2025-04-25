@@ -1,5 +1,5 @@
 use std::collections::{BTreeSet, HashMap};
-use rsnano_core::{BlockHash, BlockHashBuilder};
+use rsnano_core::{BlockHash, BlockHashBuilder, Vote};
 
 const FRONTIERS_THRESHOLD: usize = 1000;
 type ProposalHash = BlockHash;
@@ -23,6 +23,12 @@ impl PreProposal {
         }
         hasher.build()
     }
+}
+
+// A node broadcasts a PreProposalAck with the preproposal hash if it has at least 2f+1 votes of each one of the frontiers of the preproposal
+struct PreProposalAck {
+    preproposal: PreProposalHash,
+    missing_frontiers: Option<Vec<BlockHash>>
 }
 
 // Fork of A and B
@@ -169,14 +175,14 @@ fn proposal_hash_with_unordered_preproposals() {
 }
 
 #[test]
-fn proposal_frontiers() {
+fn proposal_frontiers1() {
     let block1 = BlockHash::from(1);
     let block2 = BlockHash::from(2);
     let block3 = BlockHash::from(3);
 
-    // Node 1 has final voted block 1 and block 2
+    // Node 1 has final voted block 2
     let preproposal1 = PreProposal {
-        frontiers: vec![BlockHash::from(1), BlockHash::from(2)]
+        frontiers: vec![BlockHash::from(2)]
     };
     
     // Node 2 has final voted block 1 
@@ -189,7 +195,7 @@ fn proposal_frontiers() {
         frontiers: vec![BlockHash::from(1), BlockHash::from(2)]
     };
     
-    // Node 4 is byzantine and preproposes block 3, which is a fork of block 2
+    // Node 4 has final voted block 1 but preproposes block 3, which is a fork of block 1, because it is byzantine
     let preproposal4 = PreProposal {
         frontiers: vec![BlockHash::from(3)]
     };
@@ -207,3 +213,4 @@ fn proposal_frontiers() {
     // The confirmed block1 needs to be included in the proposal
     assert!(proposal_frontiers.contains(&block1));
 }
+
