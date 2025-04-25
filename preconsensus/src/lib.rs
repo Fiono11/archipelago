@@ -26,7 +26,7 @@ impl PreProposal {
 
 struct Proposal {
     // 2f+1 valid preproposals hashes
-    // The proposal must contain all the frontiers that are included in at least f+1 preproposals
+    // The proposal contains the union of all frontiers of the preproposals
     preproposals: Vec<PreProposalHash>
 }
 
@@ -46,11 +46,10 @@ impl Proposal {
         hasher.build()
     }
     
-    /// Returns all frontiers that are included in at least f+1 preproposals
-    /// f is the Byzantine fault tolerance parameter, typically (n-1)/3 for a system with n nodes
-    fn frontiers(&self, all_preproposals: &[PreProposal], f: usize) -> Vec<BlockHash> {
-        // Count occurrences of each frontier block across all preproposals
-        let mut frontier_counts: HashMap<BlockHash, usize> = HashMap::new();
+    /// Returns the union of all frontiers from the preproposals included in this proposal
+    fn frontiers(&self, all_preproposals: &[PreProposal], _f: usize) -> Vec<BlockHash> {
+        // Collect all frontiers from the included preproposals
+        let mut all_frontiers = BTreeSet::new();
         
         for preproposal in all_preproposals {
             // Skip preproposals that are not part of this proposal
@@ -58,24 +57,14 @@ impl Proposal {
                 continue;
             }
             
-            // Count each frontier block
+            // Add each frontier block to the set
             for frontier in &preproposal.frontiers {
-                *frontier_counts.entry(*frontier).or_insert(0) += 1;
+                all_frontiers.insert(*frontier);
             }
         }
         
-        // Keep only frontiers that appear in at least f+1 preproposals
-        let threshold = f + 1;
-        let mut result: Vec<BlockHash> = frontier_counts
-            .into_iter()
-            .filter(|(_, count)| *count >= threshold)
-            .map(|(block_hash, _)| block_hash)
-            .collect();
-        
-        // Sort for deterministic output
-        result.sort();
-        
-        result
+        // Convert to sorted vector
+        all_frontiers.into_iter().collect()
     }
 }
 
@@ -162,7 +151,7 @@ fn proposal_hash_with_unordered_preproposals() {
 }
 
 #[test]
-fn proposal_frontiers1() {
+fn proposal_frontiers() {
     let block1 = BlockHash::from(1);
     let block2 = BlockHash::from(2);
     let block3 = BlockHash::from(3);
@@ -197,7 +186,8 @@ fn proposal_frontiers1() {
     let proposal = Proposal::create_proposal(preproposals.clone());
     let proposal_frontiers = proposal.frontiers(&preproposals, 1);
     
-    // The confirmed block1 needs to be included in the proposal
+    // All the blocks of 2f+1 valid preproposals must be included in the winning proposal
     assert!(proposal_frontiers.contains(&block1));
+    assert!(proposal_frontiers.contains(&block2));
 }
 
