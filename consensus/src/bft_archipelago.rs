@@ -873,13 +873,14 @@ mod tests {
                 process3.propose(threshold, instance + 2, 0)
             });
 
-            thread::spawn(move || {
+            let p4 = thread::spawn(move || {
                 process4.propose(threshold, instance + 3, 0)
             });
             
             let p1_value = p1.join().unwrap();
             let p2_value = p2.join().unwrap();
             let p3_value = p3.join().unwrap();
+            let _ = p4.join().unwrap();
 
             process1_clone.stop();
             process2_clone.stop();
