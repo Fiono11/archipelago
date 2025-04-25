@@ -187,7 +187,7 @@ fn proposal_frontiers1() {
         frontiers: vec![BlockHash::from(3)]
     };
     
-    // Create a proposal that includes the preproposals from node 1, 2 and 4 
+    // Create a proposal that includes the preproposals from node 1, 2 and 3 (proposal from node 4 is not valid because block 3 has not received at least 2f+1 votes) 
     let preproposals = vec![
         preproposal1.clone(), 
         preproposal2.clone(), 
