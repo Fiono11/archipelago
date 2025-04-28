@@ -1,9 +1,14 @@
 use std::{cmp::max, collections::{BTreeSet, HashMap, HashSet}, sync::{atomic::{AtomicBool, Ordering}, mpsc::{Receiver, Sender}, Arc, RwLock}, thread};
-use crate::{AValue, BValue, Broadcast, BroadcastHash, Decision, Id, Message, RValue, Rank, Response, State, Step, Value};
+use crate::{AValue, BValue, Broadcast, BroadcastHash, Decision, Id, Message, PreProposal, Proposal, ProposalHash, RValue, Rank, Response, State, Step, Value};
 use rand::{self, Rng};
+use rsnano_core::BlockHash;
 
 // Each process receives 2f+1 responses per step and rank 
 type Responses = Arc<RwLock<HashMap<(Step, Rank), HashMap<Id, Response>>>>;
+
+type PreProposals = Arc<RwLock<HashMap<Id, PreProposal>>>;
+
+type Proposals = HashMap<Id, Proposal>;
 
 // In the first step of rank i, each process: 
 // 1) Broadcasts its rank i, value v and an optional certificate containing responses of step B and rank i-1 from 2f+1 processes (if i > 0)
@@ -44,6 +49,7 @@ pub struct Process {
     senders: Vec<Sender<Message>>,
     stop_flag: Arc<AtomicBool>,
     byzantine: bool,
+    preproposals: PreProposals,
 }
 
 impl Process {
@@ -53,13 +59,16 @@ impl Process {
         let senders_clone = senders.clone();
         let stop_flag = Arc::new(AtomicBool::new(false));
         let stop_flag_clone = Arc::clone(&stop_flag);
+        let preproposals: PreProposals = Arc::new(RwLock::new(HashMap::new()));
+        let preproposals_clone = Arc::clone(&preproposals);
 
         let state = Process {
             id,
             responses,
             senders,
             stop_flag,
-            byzantine
+            byzantine,
+            preproposals,
         };
                 
         // Start message handling in a background thread
@@ -71,7 +80,8 @@ impl Process {
                 senders_clone,
                 stop_flag_clone,
                 receiver,
-                byzantine
+                byzantine,
+                preproposals_clone,
             );
         });
         
@@ -85,13 +95,15 @@ impl Process {
         senders: Vec<Sender<Message>>,
         stop_flag: Arc<AtomicBool>,
         receiver: Receiver<Message>,
-        byzantine: bool
+        byzantine: bool,
+        preproposals: PreProposals,
     ) {
         let r_set = Arc::new(RwLock::new(RValue::default()));
         let a_sets = Arc::new(RwLock::new(Vec::new()));
         let b_sets = Arc::new(RwLock::new(Vec::new()));
         let mut broadcasts: Broadcasts = HashMap::new();
         let mut pending_responses: PendingResponses = HashMap::new();
+        let mut proposals: Proposals = HashMap::new();
 
         loop {
             if stop_flag.load(Ordering::Relaxed) {
@@ -100,6 +112,16 @@ impl Process {
 
             if let Ok(msg) = receiver.recv() {
                 match msg {
+                    Message::PreProposal(preproposal) => {
+                        //if valid {
+                            preproposals.write().unwrap().entry(preproposal.sender).or_insert(preproposal.clone());
+                        //}
+                    }
+                    Message::Proposal(proposal) => {
+                        //if valid {
+                            proposals.entry(proposal.sender).or_insert(proposal.clone());
+                        //}
+                    }
                     Message::Broadcast(broadcast) => {                        
                         // Lines 26, 42, 62
                         let is_reliable = Process::reliably_check_broadcast(&broadcast, &broadcasts, f);
@@ -197,16 +219,21 @@ impl Process {
                     _ => unreachable!(),
                 }
             }
+            _ => ()
         }
     }
 
-    pub fn propose(&mut self, threshold: usize, value: i64, rank: Rank) -> i64 {
+    pub fn propose(&mut self, threshold: usize, value: PreProposal, rank: Rank) -> ProposalHash {
+        Process::send_message(&self.senders, &mut Message::PreProposal(value), self.byzantine);
+
         loop {
             if self.stop_flag.load(Ordering::Relaxed) {
-                return -1;
+                return BlockHash::zero();
             }
 
-            let r_value = self.r_step(threshold, RValue::new(rank, value));
+            let proposal = self.preproposal_step(threshold);
+
+            let r_value = self.r_step(threshold, RValue::new(rank, proposal.hash));
 
             let (flag, a_value) = self.a_step(threshold, r_value);
 
@@ -214,8 +241,25 @@ impl Process {
             
             match decision {
                 Decision::Commit(val) => return val,
-                Decision::Adopt(val) => self.propose(threshold, val, rank + 1)
+                Decision::Adopt(val) => return val //self.propose(threshold, val, rank + 1)
             };
+        }
+    }
+
+    fn preproposal_step(&self, threshold: usize) -> Proposal {
+        loop {
+            let preproposals = self.preproposals.read().unwrap();
+            if preproposals.len() == threshold {
+                let proposal = Proposal { 
+                    preproposals: preproposals.values().cloned().map(|x| x.hash).collect(),
+                    sender: 0,
+                    hash: BlockHash::zero(),
+                };
+
+                Process::send_message(&self.senders, &mut Message::Proposal(proposal.clone()), self.byzantine);
+
+                return proposal;
+            }
         }
     }
 
@@ -275,12 +319,13 @@ impl Process {
             .iter()
             .filter_map(|response| {
                 for state in &response.state {
-                    if let Value::RValue(r_value) = state.value {
+                    if let Value::RValue(r_value) = &state.value {
                         return Some(r_value);
                     }
                 }
                 None
             })
+            .cloned()
             .collect();
 
         // Line 21: ⟨i’,v’⟩ ← max(R)
@@ -327,7 +372,7 @@ impl Process {
     }
 
     // Line 31: Procedure A-Step(i, v)
-    fn a_step(&mut self, threshold: usize, r_value: RValue) -> (bool, i64) {
+    fn a_step(&mut self, threshold: usize, r_value: RValue) -> (bool, ProposalHash) {
         let value = r_value.value;
         let rank = r_value.rank;
 
@@ -358,7 +403,7 @@ impl Process {
         }
     }
 
-    fn process_a_responses(responses: &[Response], threshold: usize) -> (bool, i64) {
+    fn process_a_responses(responses: &[Response], threshold: usize) -> (bool, ProposalHash) {
         // Line 36: S ← union of all A[i]s received
         let a_values: Vec<AValue> = responses
             .iter()
@@ -373,7 +418,7 @@ impl Process {
             .collect();
         
         let mut value_counts: HashMap<AValue, usize> = HashMap::new();
-        let mut max_value = a_values.first().map_or(AValue(0), |v| *v);
+        let mut max_value = a_values.first().map_or(AValue(BlockHash::zero()), |v| *v);
 
         for a_value in &a_values {
             *value_counts.entry(*a_value).or_insert(0) += 1;            
@@ -465,7 +510,7 @@ impl Process {
         Process::send_message(senders, &mut Message::Response(response), byzantine);
     }
 
-    fn b_step(&mut self, threshold: usize, rank: Rank, flag: bool, value: i64) -> Decision {
+    fn b_step(&mut self, threshold: usize, rank: Rank, flag: bool, value: ProposalHash) -> Decision {
         // Line 51: compile certificate C
         let key = (Step::A, rank);
                 
@@ -559,7 +604,7 @@ impl Process {
 
             // Line 63: m ← max(B[j][0].v, B[j][1].v)
             let m = match len {
-                0 => 0,
+                0 => BlockHash::zero(),
                 1 => b_values[0].value,
                 _ => max(b_values[0].value, b_values[1].value)
             };
@@ -862,19 +907,19 @@ mod tests {
             let mut process4_clone = process4.clone();
 
             let p1 = thread::spawn(move || {
-                process1.propose(threshold, instance + 0, 0)
+                process1.propose(threshold, PreProposal::new(vec![BlockHash::from(instance + 0)], 0), 0)
             });
             
             let p2 = thread::spawn(move || {
-                process2.propose(threshold, instance + 1, 0)
+                process2.propose(threshold, PreProposal::new(vec![BlockHash::from(instance + 1)], 1), 0)
             });
             
             let p3 = thread::spawn(move || {
-                process3.propose(threshold, instance + 2, 0)
+                process3.propose(threshold, PreProposal::new(vec![BlockHash::from(instance + 2)], 2), 0)
             });
 
             let p4 = thread::spawn(move || {
-                process4.propose(threshold, instance + 3, 0)
+                process4.propose(threshold, PreProposal::new(vec![BlockHash::from(instance + 3)], 3), 0)
             });
             
             let p1_value = p1.join().unwrap();

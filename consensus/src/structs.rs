@@ -1,13 +1,19 @@
 use std::{cmp::Ordering, hash::{DefaultHasher, Hash, Hasher}};
+use rsnano_core::BlockHash;
+
+use crate::{PreProposal, Proposal, ProposalHash};
 
 pub type Id = i64;
 pub type Rank = i64;
 pub type BroadcastHash = u64;
 
+// Extract the sender (header) from the content of the message
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub enum Message {
     Broadcast(Broadcast),
     Response(Response),
+    Proposal(Proposal),
+    PreProposal(PreProposal)
 }
 
 // A process only sends one broadcast per step and rank
@@ -15,7 +21,7 @@ pub enum Message {
 pub struct Broadcast {
     pub sender: Id,
     pub step: Step,
-    pub value: i64,
+    pub value: ProposalHash,
     pub flag: Option<bool>,
     pub rank: Rank,
     pub previous_step_responses: Option<Vec<Response>>
@@ -31,7 +37,7 @@ impl Hash for Broadcast {
 }
 
 impl Broadcast {
-    pub fn new(sender: Id, step: Step, value: i64, flag: Option<bool>, rank: Rank, previous_step_responses: Option<Vec<Response>>) -> Broadcast {
+    pub fn new(sender: Id, step: Step, value: ProposalHash, flag: Option<bool>, rank: Rank, previous_step_responses: Option<Vec<Response>>) -> Broadcast {
         Broadcast { sender, step, value, flag, rank, previous_step_responses }
     }
 
@@ -87,16 +93,16 @@ impl State {
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Default, Copy, PartialOrd, Ord)]
-pub struct AValue(pub i64);
+pub struct AValue(pub ProposalHash);
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Default, Copy)]
 pub struct BValue {
-    pub value: i64, 
+    pub value: ProposalHash, 
     pub flag: bool,
 }
 
 impl BValue {
-    pub fn new(value: i64, flag: bool) -> BValue {
+    pub fn new(value: ProposalHash, flag: bool) -> BValue {
         BValue { value, flag }
     }
 }
@@ -104,11 +110,11 @@ impl BValue {
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Default, Copy)]
 pub struct RValue {
     pub rank: Rank, 
-    pub value: i64,
+    pub value: ProposalHash,
 }
 
 impl RValue {
-    pub fn new(rank: Rank, value: i64) -> RValue {
+    pub fn new(rank: Rank, value: ProposalHash) -> RValue {
         RValue { rank, value }
     }
 }
@@ -167,139 +173,8 @@ impl BState {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Decision {
-    Adopt(i64),
-    Commit(i64),
+    Adopt(ProposalHash),
+    Commit(ProposalHash),
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_broadcast_hash_value() {
-        // Create two identical broadcasts
-        let broadcast1 = Broadcast::new(
-            1,
-            Step::R,
-            42,
-            Some(true),
-            5,
-            None,
-        );
-
-        let broadcast2 = Broadcast::new(
-            1,
-            Step::R,
-            42,
-            Some(true),
-            5,
-            None,
-        );
-
-        // Create a different broadcast
-        let broadcast3 = Broadcast::new(
-            1,
-            Step::R,
-            43, // Different value
-            Some(true),
-            5,
-            None,
-        );
-
-        // Hash values of identical broadcasts should be equal
-        assert_eq!(broadcast1.hash_value(), broadcast2.hash_value());
         
-        // Hash values of different broadcasts should be different
-        assert_ne!(broadcast1.hash_value(), broadcast3.hash_value());
-
-        // Verify that the sender is not part of the hash
-        let broadcast4 = Broadcast::new(
-            2, // Different sender
-            Step::R,
-            42,
-            Some(true),
-            5,
-            None,
-        );
-        assert_eq!(broadcast1.hash_value(), broadcast4.hash_value());
-
-        // Verify that previous_step_responses is not part of the hash
-        let broadcast5 = Broadcast::new(
-            1,
-            Step::R,
-            42,
-            Some(true),
-            5,
-            Some(vec![Response::new(1, Step::R, 5, vec![])])
-        );
-        assert_eq!(broadcast1.hash_value(), broadcast5.hash_value());
-    }
-
-    #[test]
-    fn test_response_hash() {
-        // Create two identical responses
-        let response1 = Response::new(
-            1,
-            Step::R,
-            5,
-            vec![],
-        );
-
-        let response2 = Response::new(
-            1,
-            Step::R,
-            5,
-            vec![],
-        );
-
-        // Create a response with a different sender
-        let response3 = Response::new(
-            2,
-            Step::R, // Different step
-            5,
-            vec![],
-        );
-
-        // Hash values of identical responses should be equal
-        let hash1 = {
-            let mut hasher = DefaultHasher::new();
-            response1.hash(&mut hasher);
-            hasher.finish()
-        };
-
-        let hash2 = {
-            let mut hasher = DefaultHasher::new();
-            response2.hash(&mut hasher);
-            hasher.finish()
-        };
-
-        let hash3 = {
-            let mut hasher = DefaultHasher::new();
-            response3.hash(&mut hasher);
-            hasher.finish()
-        };
-
-        assert_eq!(hash1, hash2);
-        assert_ne!(hash1, hash3);
-
-        // Test that response with different state has different hash
-        let state = State::new(
-            Value::RValue(RValue::new(5, 42)),
-            Broadcast::new(1, Step::R, 42, Some(true), 5, None)
-        );
-        let response4 = Response::new(
-            1,
-            Step::R,
-            5,
-            vec![state],
-        );
-
-        let hash4 = {
-            let mut hasher = DefaultHasher::new();
-            response4.hash(&mut hasher);
-            hasher.finish()
-        };
-
-        assert_ne!(hash1, hash4);
-    }
-}

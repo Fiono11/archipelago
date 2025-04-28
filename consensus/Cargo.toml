@@ -9,3 +9,4 @@ log = "0.4"
 env_logger = "0.10"
 simple_logger = "4.3"
 chrono = "0.4" 
+rsnano_core = { git = "https://github.com/rsnano-node/rsnano-node", branch="develop" }
