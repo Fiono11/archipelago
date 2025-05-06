@@ -31,7 +31,7 @@ impl PreProposal {
         }
     }
 
-    fn hash(&self) -> BlockHash {
+    pub fn hash(&self) -> BlockHash {
         let mut hasher = Blake2HashBuilder::new();
         let frontiers: BTreeSet<BlockHash> = self.frontiers.iter().cloned().collect();
         for frontier in &frontiers {

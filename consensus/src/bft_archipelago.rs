@@ -915,10 +915,22 @@ mod tests {
             let mut process4 = Process::new(3, f, vec![sender1.clone(), sender2.clone(), sender3.clone(), sender4.clone()], receiver4, true);
             let mut process4_clone = process4.clone();
 
-            let preproposal1 = PreProposal::new(vec![BlockHash::from(instance + 0)], 0);
-            let preproposal2 = PreProposal::new(vec![BlockHash::from(instance + 1)], 1);
-            let preproposal3 = PreProposal::new(vec![BlockHash::from(instance + 2)], 2);
-            let preproposal4 = PreProposal::new(vec![BlockHash::from(instance + 3)], 3);
+            let block1 = BlockHash::from(instance + 0);
+            let block2 = BlockHash::from(instance + 1);
+            let block3 = BlockHash::from(instance + 2);
+            let block4 = BlockHash::from(instance + 3);
+
+            let preproposal1 = PreProposal::new(vec![block1], 0);
+            let preproposal2 = PreProposal::new(vec![block2], 1);
+            let preproposal3 = PreProposal::new(vec![block3], 2);
+            let preproposal4 = PreProposal::new(vec![block4], 3);
+
+            let mut preproposals = Vec::new();
+
+            preproposals.push(preproposal1.clone());
+            preproposals.push(preproposal2.clone());
+            preproposals.push(preproposal3.clone());
+            preproposals.push(preproposal4.clone());
 
             let p1 = thread::spawn(move || {
                 process1.propose(threshold, preproposal1, 0)
@@ -948,7 +960,52 @@ mod tests {
 
             assert_eq!(p1_value.hash, p2_value.hash);
             assert_eq!(p1_value.hash, p3_value.hash);
-            //assert!(p1_value)
+
+            let agreed_preproposals = p1_value.preproposals;
+            let mut confirmed_blocks = Vec::new();
+
+            let mut block_counts: HashMap<BlockHash, usize> = HashMap::new();
+
+            // Count the number of times each block appears in preproposals
+            for preproposal in &preproposals {
+                for block in &preproposal.frontiers {
+                    *block_counts.entry(block.clone()).or_insert(0) += 1;
+                }
+            }
+
+            // Add blocks that meet or exceed the threshold to confirmed_blocks
+            for (block, count) in block_counts {
+                if count >= threshold {
+                    confirmed_blocks.push(block);
+                }
+            }
+
+            // Map preproposal hash -> PreProposal object
+            let mut preproposal_map: HashMap<_, _> = HashMap::new();
+            for preproposal in &preproposals {
+                preproposal_map.insert(preproposal.hash, preproposal.clone());
+            }
+
+            // Retrieve full PreProposal objects from agreed_preproposals
+            let mut agreed_blocks = HashSet::new();
+            for preproposal_hash in &agreed_preproposals {
+                if let Some(preproposal) = preproposal_map.get(preproposal_hash) {
+                    for block in &preproposal.frontiers {
+                        agreed_blocks.insert(block.clone());
+                    }
+                } else {
+                    panic!("Agreed preproposal hash {:?} not found in original preproposals", preproposal_hash);
+                }
+            }
+
+            // Assert that all confirmed blocks are in the agreed preproposals
+            for block in &confirmed_blocks {
+                assert!(
+                    agreed_blocks.contains(block),
+                    "Confirmed block {:?} not found in agreed preproposals",
+                    block
+                );
+            }
         }
     }
 }
