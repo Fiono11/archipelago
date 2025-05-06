@@ -114,7 +114,10 @@ impl Process {
                 match msg {
                     Message::PreProposal(preproposal) => {
                         //if valid {
-                            preproposals.write().unwrap().entry(preproposal.sender).or_insert(preproposal.clone());
+                        let mut preproposals= preproposals.write().unwrap();
+                        preproposals.entry(preproposal.sender).or_insert(preproposal.clone());
+
+                        //println!("Process {} has received preproposal {:?} of a total of {}", id, &preproposal, preproposals.len());
                         //}
                     }
                     Message::Proposal(proposal) => {
@@ -224,14 +227,12 @@ impl Process {
     }
 
     pub fn propose(&mut self, threshold: usize, value: PreProposal, rank: Rank) -> ProposalHash {
-        Process::send_message(&self.senders, &mut Message::PreProposal(value), self.byzantine);
-
         loop {
             if self.stop_flag.load(Ordering::Relaxed) {
                 return BlockHash::zero();
             }
 
-            let proposal = self.preproposal_step(threshold);
+            let proposal = self.preproposal_step(threshold, value);
 
             let r_value = self.r_step(threshold, RValue::new(rank, proposal.hash));
 
@@ -246,13 +247,17 @@ impl Process {
         }
     }
 
-    fn preproposal_step(&self, threshold: usize) -> Proposal {
+    fn preproposal_step(&self, threshold: usize, value: PreProposal) -> Proposal {
+        Process::send_message(&self.senders, &mut Message::PreProposal(value), self.byzantine);
+
         loop {
             let preproposals = self.preproposals.read().unwrap();
-            if preproposals.len() == threshold {
+            //println!("Preprosals of process {}: {:?}", self.id, &preproposals);
+
+            if preproposals.len() >= threshold {
                 let proposal = Proposal { 
                     preproposals: preproposals.values().cloned().map(|x| x.hash).collect(),
-                    sender: 0,
+                    sender: self.id,
                     hash: BlockHash::zero(),
                 };
 
