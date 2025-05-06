@@ -1,7 +1,6 @@
 use std::{cmp::Ordering, hash::{DefaultHasher, Hash, Hasher}};
 use rsnano_core::BlockHash;
-
-use crate::{PreProposal, Proposal, ProposalHash};
+use crate::{PreProposal, Proposal, ProposalHash, Decision::{Commit, Adopt}};
 
 pub type Id = i64;
 pub type Rank = i64;
@@ -175,6 +174,15 @@ impl BState {
 pub enum Decision {
     Adopt(ProposalHash),
     Commit(ProposalHash),
+}
+
+impl Decision {
+    pub fn value(&self) -> ProposalHash {
+        match self {
+            Adopt(hash) => *hash,
+            Commit(hash) => *hash,
+        }
+    }
 }
 
         

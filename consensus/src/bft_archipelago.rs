@@ -8,7 +8,7 @@ type Responses = Arc<RwLock<HashMap<(Step, Rank), HashMap<Id, Response>>>>;
 
 type PreProposals = Arc<RwLock<HashMap<Id, PreProposal>>>;
 
-type Proposals = HashMap<Id, Proposal>;
+type Proposals = Arc<RwLock<HashMap<Id, Proposal>>>;
 
 // In the first step of rank i, each process: 
 // 1) Broadcasts its rank i, value v and an optional certificate containing responses of step B and rank i-1 from 2f+1 processes (if i > 0)
@@ -50,6 +50,7 @@ pub struct Process {
     stop_flag: Arc<AtomicBool>,
     byzantine: bool,
     preproposals: PreProposals,
+    proposals: Proposals,
 }
 
 impl Process {
@@ -61,6 +62,8 @@ impl Process {
         let stop_flag_clone = Arc::clone(&stop_flag);
         let preproposals: PreProposals = Arc::new(RwLock::new(HashMap::new()));
         let preproposals_clone = Arc::clone(&preproposals);
+        let proposals: Proposals = Arc::new(RwLock::new(HashMap::new()));
+        let proposals_clone = Arc::clone(&proposals);
 
         let state = Process {
             id,
@@ -69,6 +72,7 @@ impl Process {
             stop_flag,
             byzantine,
             preproposals,
+            proposals
         };
                 
         // Start message handling in a background thread
@@ -82,6 +86,7 @@ impl Process {
                 receiver,
                 byzantine,
                 preproposals_clone,
+                proposals_clone
             );
         });
         
@@ -97,13 +102,13 @@ impl Process {
         receiver: Receiver<Message>,
         byzantine: bool,
         preproposals: PreProposals,
+        proposals: Proposals,
     ) {
         let r_set = Arc::new(RwLock::new(RValue::default()));
         let a_sets = Arc::new(RwLock::new(Vec::new()));
         let b_sets = Arc::new(RwLock::new(Vec::new()));
         let mut broadcasts: Broadcasts = HashMap::new();
         let mut pending_responses: PendingResponses = HashMap::new();
-        let mut proposals: Proposals = HashMap::new();
 
         loop {
             if stop_flag.load(Ordering::Relaxed) {
@@ -114,14 +119,13 @@ impl Process {
                 match msg {
                     Message::PreProposal(preproposal) => {
                         //if valid {
-                        let mut preproposals= preproposals.write().unwrap();
-                        preproposals.entry(preproposal.sender).or_insert(preproposal.clone());
-
-                        //println!("Process {} has received preproposal {:?} of a total of {}", id, &preproposal, preproposals.len());
+                            let mut preproposals= preproposals.write().unwrap();
+                            preproposals.entry(preproposal.sender).or_insert(preproposal.clone());
                         //}
                     }
                     Message::Proposal(proposal) => {
                         //if valid {
+                            let mut proposals= proposals.write().unwrap();
                             proposals.entry(proposal.sender).or_insert(proposal.clone());
                         //}
                     }
@@ -232,7 +236,7 @@ impl Process {
                 return BlockHash::zero();
             }
 
-            let proposal = self.preproposal_step(threshold, value);
+            let proposal = self.preproposal_step(threshold, value.clone());
 
             let r_value = self.r_step(threshold, RValue::new(rank, proposal.hash));
 
@@ -242,7 +246,7 @@ impl Process {
             
             match decision {
                 Decision::Commit(val) => return val,
-                Decision::Adopt(val) => return val //self.propose(threshold, val, rank + 1)
+                Decision::Adopt(val) => self.r_step(threshold, RValue::new(rank + 1, val))
             };
         }
     }
@@ -252,7 +256,6 @@ impl Process {
 
         loop {
             let preproposals = self.preproposals.read().unwrap();
-            //println!("Preprosals of process {}: {:?}", self.id, &preproposals);
 
             if preproposals.len() >= threshold {
                 let proposal = Proposal { 
