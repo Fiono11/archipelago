@@ -230,10 +230,10 @@ impl Process {
         }
     }
 
-    pub fn propose(&mut self, threshold: usize, value: PreProposal, rank: Rank) -> ProposalHash {
+    pub fn propose(&mut self, threshold: usize, value: PreProposal, rank: Rank) -> Proposal {
         loop {
             if self.stop_flag.load(Ordering::Relaxed) {
-                return BlockHash::zero();
+                return Proposal::default();
             }
 
             let proposal = self.preproposal_step(threshold, value.clone());
@@ -245,7 +245,12 @@ impl Process {
             let decision = self.b_step(threshold, r_value.rank, flag, a_value);
             
             match decision {
-                Decision::Commit(val) => return val,
+                Decision::Commit(val) => {
+                    let proposals = self.proposals.read().unwrap();
+                    let proposal = proposals.iter().find(|(_, proposal)| proposal.hash == val).unwrap().1;
+                    
+                    return proposal.clone()
+                },
                 Decision::Adopt(val) => self.r_step(threshold, RValue::new(rank + 1, val))
             };
         }
@@ -258,11 +263,7 @@ impl Process {
             let preproposals = self.preproposals.read().unwrap();
 
             if preproposals.len() >= threshold {
-                let proposal = Proposal { 
-                    preproposals: preproposals.values().cloned().map(|x| x.hash).collect(),
-                    sender: self.id,
-                    hash: BlockHash::zero(),
-                };
+                let proposal = Proposal::new(preproposals.values().cloned().map(|x| x.hash).collect(), self.id);
 
                 Process::send_message(&self.senders, &mut Message::Proposal(proposal.clone()), self.byzantine);
 
@@ -914,20 +915,25 @@ mod tests {
             let mut process4 = Process::new(3, f, vec![sender1.clone(), sender2.clone(), sender3.clone(), sender4.clone()], receiver4, true);
             let mut process4_clone = process4.clone();
 
+            let preproposal1 = PreProposal::new(vec![BlockHash::from(instance + 0)], 0);
+            let preproposal2 = PreProposal::new(vec![BlockHash::from(instance + 1)], 1);
+            let preproposal3 = PreProposal::new(vec![BlockHash::from(instance + 2)], 2);
+            let preproposal4 = PreProposal::new(vec![BlockHash::from(instance + 3)], 3);
+
             let p1 = thread::spawn(move || {
-                process1.propose(threshold, PreProposal::new(vec![BlockHash::from(instance + 0)], 0), 0)
+                process1.propose(threshold, preproposal1, 0)
             });
             
             let p2 = thread::spawn(move || {
-                process2.propose(threshold, PreProposal::new(vec![BlockHash::from(instance + 1)], 1), 0)
+                process2.propose(threshold, preproposal2, 0)
             });
             
             let p3 = thread::spawn(move || {
-                process3.propose(threshold, PreProposal::new(vec![BlockHash::from(instance + 2)], 2), 0)
+                process3.propose(threshold, preproposal3, 0)
             });
 
             let p4 = thread::spawn(move || {
-                process4.propose(threshold, PreProposal::new(vec![BlockHash::from(instance + 3)], 3), 0)
+                process4.propose(threshold, preproposal4, 0)
             });
             
             let p1_value = p1.join().unwrap();
@@ -940,8 +946,9 @@ mod tests {
             process3_clone.stop();
             process4_clone.stop();
 
-            assert_eq!(p1_value, p2_value);
-            assert_eq!(p1_value, p3_value);
+            assert_eq!(p1_value.hash, p2_value.hash);
+            assert_eq!(p1_value.hash, p3_value.hash);
+            //assert!(p1_value)
         }
     }
 }

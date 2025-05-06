@@ -51,7 +51,21 @@ pub struct Proposal {
 }
 
 impl Proposal {
-    fn create_proposal(preproposals: Vec<PreProposal>, sender: Id) -> Proposal {
+    pub fn new(preproposals_hashes: Vec<PreProposalHash>, sender: Id) -> Proposal {
+        let mut hasher = Blake2HashBuilder::new();
+        for hash in &preproposals_hashes {
+            hasher = hasher.update(hash.as_bytes());
+        }
+        let hash = hasher.build();
+
+        Proposal {
+            preproposals: preproposals_hashes,
+            sender,
+            hash
+        }
+    }
+
+    pub fn create_proposal(preproposals: Vec<PreProposal>, sender: Id) -> Proposal {
         let mut hasher = Blake2HashBuilder::new();
         for preproposal in &preproposals {
             hasher = hasher.update(preproposal.hash().as_bytes());
@@ -65,7 +79,7 @@ impl Proposal {
         }
     }
 
-    fn hash(&self) -> ProposalHash {
+    pub fn hash(&self) -> ProposalHash {
         let mut hasher = Blake2HashBuilder::new();
         let preproposals: BTreeSet<ProposalHash> = self.preproposals.iter().cloned().collect();
         for preproposal in &preproposals {
