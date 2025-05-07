@@ -1,3 +1,2 @@
-consensus/target
-preconsensus/target
+target
 *.log
