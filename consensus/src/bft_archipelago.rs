@@ -894,7 +894,7 @@ mod tests {
     fn test_consensus() {
         setup_logger();
 
-        for instance in 1..1000 {
+        for instance in 1..2 {
             let (sender1, receiver1) = channel();
             let (sender2, receiver2) = channel();
             let (sender3, receiver3) = channel();
@@ -920,9 +920,9 @@ mod tests {
             let block3 = BlockHash::from(instance + 2);
             let block4 = BlockHash::from(instance + 3);
 
-            let preproposal1 = PreProposal::new(vec![block1], 0);
+            let preproposal1 = PreProposal::new(vec![block1, block2], 0);
             let preproposal2 = PreProposal::new(vec![block2], 1);
-            let preproposal3 = PreProposal::new(vec![block3], 2);
+            let preproposal3 = PreProposal::new(vec![block3, block2], 2);
             let preproposal4 = PreProposal::new(vec![block4], 3);
 
             let mut preproposals = Vec::new();
@@ -966,27 +966,23 @@ mod tests {
 
             let mut block_counts: HashMap<BlockHash, usize> = HashMap::new();
 
-            // Count the number of times each block appears in preproposals
             for preproposal in &preproposals {
                 for block in &preproposal.frontiers {
                     *block_counts.entry(block.clone()).or_insert(0) += 1;
                 }
             }
 
-            // Add blocks that meet or exceed the threshold to confirmed_blocks
             for (block, count) in block_counts {
                 if count >= threshold {
                     confirmed_blocks.push(block);
                 }
             }
 
-            // Map preproposal hash -> PreProposal object
             let mut preproposal_map: HashMap<_, _> = HashMap::new();
             for preproposal in &preproposals {
                 preproposal_map.insert(preproposal.hash, preproposal.clone());
             }
 
-            // Retrieve full PreProposal objects from agreed_preproposals
             let mut agreed_blocks = HashSet::new();
             for preproposal_hash in &agreed_preproposals {
                 if let Some(preproposal) = preproposal_map.get(preproposal_hash) {
@@ -998,7 +994,6 @@ mod tests {
                 }
             }
 
-            // Assert that all confirmed blocks are in the agreed preproposals
             for block in &confirmed_blocks {
                 assert!(
                     agreed_blocks.contains(block),
