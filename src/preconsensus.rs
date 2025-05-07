@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 use rsnano_core::{Blake2HashBuilder, BlockHash};
 use crate::Id;
 
@@ -218,28 +218,28 @@ fn proposal_frontiers() {
 
     // Node 1 has final voted block 2
     let preproposal1 = PreProposal {
-        frontiers: vec![BlockHash::from(2)],
+        frontiers: vec![block1],
         sender: 0,
         hash: BlockHash::default(),
     };
     
     // Node 2 has final voted block 1 
     let preproposal2 = PreProposal {
-        frontiers: vec![BlockHash::from(1)],
+        frontiers: vec![block2],
         sender: 0,
         hash: BlockHash::default(),
     };
     
     // Node 3 has confirmed block 1 and final voted block 2
     let preproposal3 = PreProposal {
-        frontiers: vec![BlockHash::from(1), BlockHash::from(2)], 
+        frontiers: vec![block1, block2], 
         sender: 0,
         hash: BlockHash::default(),
     };
     
     // Node 4 has final voted block 1 but preproposes block 3, which is a fork of block 1, because it is byzantine
-    let preproposal4 = PreProposal {
-        frontiers: vec![BlockHash::from(3)],
+    let _preproposal4 = PreProposal {
+        frontiers: vec![block3],
         sender: 0,
         hash: BlockHash::default(),
     };

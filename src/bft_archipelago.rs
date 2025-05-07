@@ -894,7 +894,7 @@ mod tests {
     fn test_consensus() {
         setup_logger();
 
-        for instance in 1..2 {
+        for instance in 1..1000 {
             let (sender1, receiver1) = channel();
             let (sender2, receiver2) = channel();
             let (sender3, receiver3) = channel();
